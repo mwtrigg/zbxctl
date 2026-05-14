@@ -493,6 +493,7 @@ var (
 	getTriggersHost     string
 	getTriggersSeverity string
 	getTriggersStatus   string
+	getTriggersProblem  bool
 	getTriggersLimit    int
 	getTriggersSortBy   string
 )
@@ -508,6 +509,7 @@ func init() {
 	f.StringVar(&getTriggersHost, "host", "", "filter by host name or ID")
 	f.StringVar(&getTriggersSeverity, "severity", "", "minimum severity: 0-5 or not_classified|information|warning|average|high|disaster")
 	f.StringVar(&getTriggersStatus, "status", "", "filter by status: enabled|disabled")
+	f.BoolVar(&getTriggersProblem, "problem", false, "only show triggers currently in PROBLEM state")
 	f.IntVar(&getTriggersLimit, "limit", 0, "max results")
 	f.StringVar(&getTriggersSortBy, "sort-by", "priority", "sort field: priority|lastchange|description")
 	getCmd.AddCommand(getTriggersCmd)
@@ -520,8 +522,9 @@ func runGetTriggers(cmd *cobra.Command, args []string) error {
 	}
 
 	filter := resources.TriggerFilter{
-		SortField: getTriggersSortBy,
-		Limit:     effectiveLimit(getTriggersLimit, ctx),
+		SortField:    getTriggersSortBy,
+		Limit:        effectiveLimit(getTriggersLimit, ctx),
+		OnlyProblems: getTriggersProblem,
 	}
 
 	if getTriggersHost != "" {
@@ -598,6 +601,7 @@ var (
 	getProblemsSeverity     string
 	getProblemsSince        string
 	getProblemsAcknowledged string
+	getProblemsResolved     bool
 	getProblemsLimit        int
 )
 
@@ -613,6 +617,7 @@ func init() {
 	f.StringVar(&getProblemsSeverity, "severity", "", "minimum severity: 0-5 or not_classified|information|warning|average|high|disaster")
 	f.StringVar(&getProblemsSince, "since", "", "only problems after this time (unix timestamp, RFC3339, or YYYY-MM-DD)")
 	f.StringVar(&getProblemsAcknowledged, "acknowledged", "", "filter: true=acknowledged only, false=unacknowledged only")
+	f.BoolVar(&getProblemsResolved, "resolved", false, "include recently-resolved problems (default: open only)")
 	f.IntVar(&getProblemsLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getProblemsCmd)
 }
@@ -626,6 +631,7 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 	filter := resources.ProblemFilter{
 		MinSeverity: -1,
 		Limit:       effectiveLimit(getProblemsLimit, ctx),
+		Recent:      getProblemsResolved,
 	}
 
 	if getProblemsHost != "" {
@@ -674,21 +680,32 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 		{Key: "eventid", Header: "EVENT_ID"},
 		{Key: "name", Header: "NAME"},
 		{Key: "severity", Header: "SEVERITY"},
+		{Key: "status", Header: "STATUS"},
 		{Key: "acknowledged", Header: "ACK"},
-		{Key: "clock", Header: "TIME"},
+		{Key: "clock", Header: "OPENED"},
+		{Key: "r_clock", Header: "RESOLVED"},
 	}
 	rows := make([]map[string]any, len(problems))
 	for i, p := range problems {
+		resolved := p.RecoveryEventID != "" && p.RecoveryEventID != "0"
+		statusLabel := "open"
+		if resolved {
+			statusLabel = "resolved"
+		}
 		rows[i] = map[string]any{
 			"eventid":          p.EventID,
 			"objectid":         p.ObjectID,
 			"name":             p.Name,
 			"severity":         severityLabel(p.Severity),
 			"severity_raw":     p.Severity,
+			"status":           statusLabel,
 			"acknowledged":     acknowledgedLabel(p.Acknowledged),
 			"acknowledged_raw": p.Acknowledged,
 			"clock":            fmtUnix(p.Clock),
 			"clock_unix":       p.Clock,
+			"r_eventid":        p.RecoveryEventID,
+			"r_clock":          fmtUnix(p.RecoveryClock),
+			"r_clock_unix":     p.RecoveryClock,
 		}
 	}
 	return output.Print(outFmt, cols, rows)
