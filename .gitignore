@@ -1,0 +1,14 @@
+# zbxctl binary (root-level only)
+/zbxctl
+/zbxctl.exe
+
+# build output
+dist/
+
+# environment overrides
+.env
+
+# editor / OS
+.DS_Store
+.idea/
+*.swp
