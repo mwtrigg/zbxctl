@@ -67,6 +67,10 @@ func init() {
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(contextCmd)
 	rootCmd.AddCommand(getCmd)
+	rootCmd.AddCommand(enableCmd)
+	rootCmd.AddCommand(disableCmd)
+	rootCmd.AddCommand(acknowledgeCmd)
+	rootCmd.AddCommand(maintenanceCmd)
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(completionCmd)
 }
