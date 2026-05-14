@@ -91,12 +91,11 @@ func printTable(columns []Column, rows []map[string]any) error {
 	return nil
 }
 
-func printJSON(columns []Column, rows []map[string]any) error {
-	filtered := filterColumns(columns, rows)
+func printJSON(_ []Column, rows []map[string]any) error {
 	envelope := map[string]any{
-		"data": filtered,
+		"data": rows,
 		"meta": map[string]any{
-			"count": len(filtered),
+			"count": len(rows),
 		},
 	}
 	enc := json.NewEncoder(os.Stdout)
@@ -104,10 +103,9 @@ func printJSON(columns []Column, rows []map[string]any) error {
 	return enc.Encode(envelope)
 }
 
-func printJSONL(columns []Column, rows []map[string]any) error {
-	filtered := filterColumns(columns, rows)
+func printJSONL(_ []Column, rows []map[string]any) error {
 	enc := json.NewEncoder(os.Stdout)
-	for _, row := range filtered {
+	for _, row := range rows {
 		if err := enc.Encode(row); err != nil {
 			return err
 		}

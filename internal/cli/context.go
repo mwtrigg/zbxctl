@@ -36,8 +36,7 @@ func init() {
 func runContextList(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfigFile()
 	if err != nil {
-		output.PrintError(output.Format(flagOutput), err.Error(), output.ExitError)
-		return nil
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
 	}
 
 	cols := []output.Column{
@@ -66,8 +65,7 @@ func runContextUse(cmd *cobra.Command, args []string) error {
 	name := args[0]
 
 	if err := config.WriteCurrentContext(name); err != nil {
-		output.PrintError(output.Format(flagOutput), err.Error(), output.ExitError)
-		return nil
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
 	}
 
 	fmt.Fprintf(os.Stdout, "switched to context %q\n", name)
