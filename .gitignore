@@ -1,3 +1,6 @@
+# Author
+.author
+
 # zbxctl binary (root-level only)
 /zbxctl
 /zbxctl.exe
@@ -8,7 +11,3 @@ dist/
 # environment overrides
 .env
 
-# editor / OS
-.DS_Store
-.idea/
-*.swp
