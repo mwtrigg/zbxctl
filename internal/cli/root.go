@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -16,6 +17,19 @@ var (
 	flagInsecure bool
 )
 
+// cliErr is a sentinel error that carries a desired process exit code.
+// Cobra won't print it (SilenceErrors is set); Execute() reads the code.
+type cliErr struct{ code int }
+
+func (e *cliErr) Error() string { return "" }
+
+// cliPrintErr prints a structured error to stderr and returns a cliErr so the
+// process exits with the correct code.
+func cliPrintErr(outFmt output.Format, msg string, code int) error {
+	output.PrintError(outFmt, msg, code)
+	return &cliErr{code: code}
+}
+
 // rootCmd is the base command.
 var rootCmd = &cobra.Command{
 	Use:   "zbxctl",
@@ -30,6 +44,10 @@ Single static binary. Machine-readable output. Structured errors.`,
 // Execute runs the root command and returns an exit code.
 func Execute() int {
 	if err := rootCmd.Execute(); err != nil {
+		var ce *cliErr
+		if errors.As(err, &ce) {
+			return ce.code
+		}
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		return output.ExitError
 	}
@@ -48,4 +66,7 @@ func init() {
 
 	rootCmd.AddCommand(authCmd)
 	rootCmd.AddCommand(contextCmd)
+	rootCmd.AddCommand(getCmd)
+	rootCmd.AddCommand(llmCmd)
+	rootCmd.AddCommand(completionCmd)
 }
