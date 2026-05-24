@@ -424,59 +424,104 @@ func runGetItems(cmd *cobra.Command, args []string) error {
 	return output.Print(outFmt, cols, rows)
 }
 
-// ── get latestdata <host> ─────────────────────────────────────────────────────
+// ── get latestdata [<host>] ───────────────────────────────────────────────────
 
-var getLatestDataLimit int
+var (
+	getLatestDataLimit    int
+	flagLatestdataHosts   []string
+	flagLatestdataGroups  []string
+	flagLatestdataItem    string
+)
 
 var getLatestDataCmd = &cobra.Command{
-	Use:   "latestdata <host>",
+	Use:   "latestdata [<host>]",
 	Short: "Show latest collected metric values for a host",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runGetLatestData,
 }
 
 func init() {
-	getLatestDataCmd.Flags().IntVar(&getLatestDataLimit, "limit", 0, "max results")
+	f := getLatestDataCmd.Flags()
+	f.IntVar(&getLatestDataLimit, "limit", 0, "max results")
+	f.StringArrayVar(&flagLatestdataHosts, "host", nil, "host name or ID (repeatable)")
+	f.StringArrayVar(&flagLatestdataGroups, "group", nil, "host group name or ID (repeatable)")
+	f.StringVar(&flagLatestdataItem, "item", "", "filter by item key substring")
 	getCmd.AddCommand(getLatestDataCmd)
 }
 
 func runGetLatestData(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
 	}
 
-	hostID, err := resources.ResolveHostID(c, args[0])
-	if err != nil {
-		var nfe *resources.NotFoundError
-		if errors.As(err, &nfe) {
-			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+	// Collect all host targets: positional arg + --host flags.
+	hostTargets := append([]string{}, flagLatestdataHosts...)
+	if len(args) > 0 {
+		hostTargets = append(hostTargets, args[0])
+	}
+
+	if len(hostTargets) == 0 && len(flagLatestdataGroups) == 0 {
+		return cliPrintErr(outFmt, "provide at least one host (positional or --host) or --group", output.ExitError)
+	}
+
+	var hostIDs []string
+	for _, h := range hostTargets {
+		id, err := resources.ResolveHostID(c, h)
+		if err != nil {
+			var nfe *resources.NotFoundError
+			if errors.As(err, &nfe) {
+				return cliPrintErr(outFmt, fmt.Sprintf("host %q: %s", h, err), output.ExitNotFound)
+			}
+			return cliPrintErr(outFmt, fmt.Sprintf("host %q: %s", h, err), output.ExitError)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		hostIDs = append(hostIDs, id)
+	}
+
+	var groupIDs []string
+	for _, g := range flagLatestdataGroups {
+		id, err := resources.ResolveGroupID(c, g)
+		if err != nil {
+			var nfe *resources.NotFoundError
+			if errors.As(err, &nfe) {
+				return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", g, err), output.ExitNotFound)
+			}
+			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", g, err), output.ExitError)
+		}
+		groupIDs = append(groupIDs, id)
 	}
 
 	items, err := resources.GetLatestData(c, resources.ItemFilter{
-		HostIDs: []string{hostID},
-		Limit:   effectiveLimit(getLatestDataLimit, ctx),
+		HostIDs:   hostIDs,
+		GroupIDs:  groupIDs,
+		KeySearch: flagLatestdataItem,
+		Limit:     effectiveLimit(getLatestDataLimit, ctx),
+		WithHost:  true,
 	})
 	if err != nil {
 		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
 	cols := []output.Column{
-		{Key: "name", Header: "NAME"},
+		{Key: "host", Header: "HOST"},
+		{Key: "hostid", Header: "HOSTID"},
+		{Key: "itemid", Header: "ITEMID"},
 		{Key: "key_", Header: "KEY"},
+		{Key: "name", Header: "NAME"},
+		{Key: "value_type", Header: "VALUE_TYPE"},
 		{Key: "lastvalue", Header: "LAST_VALUE"},
+		{Key: "lastclock", Header: "LAST_SEEN"},
+		{Key: "lastclock_unix", Header: "LAST_SEEN_UNIX"},
 		{Key: "units", Header: "UNITS"},
-		{Key: "lastclock", Header: "LAST_CLOCK"},
 	}
 	rows := make([]map[string]any, len(items))
 	for i, it := range items {
 		rows[i] = map[string]any{
-			"itemid":         it.ItemID,
+			"host":           it.Host,
 			"hostid":         it.HostID,
-			"name":           it.Name,
+			"itemid":         it.ItemID,
 			"key_":           it.Key,
+			"name":           it.Name,
 			"value_type":     it.ValueType,
 			"lastvalue":      it.LastValue,
 			"lastclock":      fmtUnix(it.LastClock),
