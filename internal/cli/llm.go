@@ -490,7 +490,7 @@ var capabilities = []CommandSchema{
 		Flags: append(globalFlags(),
 			FlagSchema{Name: "since", Type: "string", Description: "Event window before now (e.g. 1h, 6h, 24h). Default: 24h.", Required: false, Default: "24h"},
 		),
-		OutputFields: []string{"host{hostid,host,name,status,available}", "open_problems[]", "recent_events[]", "latestdata[]", "broken_items[]", "meta{host,since,generated_at}"},
+		OutputFields: []string{"host{hostid,host,name,status,available,iface_available}", "open_problems[]", "recent_events[]", "latestdata[]", "broken_items[]", "meta{host,since,generated_at}"},
 		Examples: []string{
 			"zbxctl diagnose host web-server-01 --output json",
 			"zbxctl diagnose host 10001 --since 6h --output jsonl",
