@@ -490,3 +490,252 @@ func init() {
 	maintenanceCmd.AddCommand(maintenanceDeleteCmd)
 	maintenanceCmd.AddCommand(maintenanceListCmd)
 }
+
+// ── create host ───────────────────────────────────────────────────────────────
+
+var (
+	// create host flags
+	flagCreateHostName          string
+	flagCreateHostGroups        []string
+	flagCreateHostIP            string
+	flagCreateHostDNS           string
+	flagCreateHostPort          string
+	flagCreateHostIfaceType     string
+	flagCreateHostVisibleName   string
+	flagCreateHostDescription   string
+	flagCreateHostSNMPVersion   string
+	flagCreateHostSNMPCommunity string
+
+	// update host flags
+	flagUpdateHostVisibleName     string
+	flagUpdateHostDescription     string
+	flagUpdateHostAddGroups       []string
+	flagUpdateHostRemoveGroups    []string
+	flagUpdateHostAddTemplates    []string
+	flagUpdateHostRemoveTemplates []string
+)
+
+var createCmd = &cobra.Command{Use: "create", Short: "Create resources"}
+var createHostCmd = &cobra.Command{
+	Use:   "host",
+	Short: "Create a new Zabbix host",
+	RunE:  runCreateHost,
+}
+
+var updateCmd = &cobra.Command{Use: "update", Short: "Update resources"}
+var updateHostCmd = &cobra.Command{
+	Use:   "host <id|name>",
+	Short: "Update a Zabbix host",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runUpdateHost,
+}
+
+var deleteCmd = &cobra.Command{Use: "delete", Short: "Delete resources"}
+var deleteHostCmd = &cobra.Command{
+	Use:   "host <id|name>",
+	Short: "Delete a Zabbix host",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runDeleteHost,
+}
+
+func init() {
+	f := createHostCmd.Flags()
+	f.StringVar(&flagCreateHostName, "name", "", "technical host name (required)")
+	f.StringArrayVar(&flagCreateHostGroups, "group", nil, "host group name or ID (required, repeatable)")
+	f.StringVar(&flagCreateHostIP, "ip", "", "interface IP address")
+	f.StringVar(&flagCreateHostDNS, "dns", "", "interface DNS name")
+	f.StringVar(&flagCreateHostPort, "port", "10050", "interface port")
+	f.StringVar(&flagCreateHostIfaceType, "interface-type", "agent", "interface type: agent|snmp|ipmi|jmx")
+	f.StringVar(&flagCreateHostVisibleName, "visible-name", "", "visible name (defaults to --name)")
+	f.StringVar(&flagCreateHostDescription, "description", "", "host description")
+	f.StringVar(&flagCreateHostSNMPVersion, "snmp-version", "2", "SNMP version: 1|2|3 (SNMP only)")
+	f.StringVar(&flagCreateHostSNMPCommunity, "snmp-community", "public", "SNMP community (v1/v2c only)")
+	_ = createHostCmd.MarkFlagRequired("name")
+	_ = createHostCmd.MarkFlagRequired("group")
+	createCmd.AddCommand(createHostCmd)
+
+	g := updateHostCmd.Flags()
+	g.StringVar(&flagUpdateHostVisibleName, "visible-name", "", "new visible name")
+	g.StringVar(&flagUpdateHostDescription, "description", "", "new description")
+	g.StringArrayVar(&flagUpdateHostAddGroups, "add-group", nil, "host group to add (repeatable)")
+	g.StringArrayVar(&flagUpdateHostRemoveGroups, "remove-group", nil, "host group to remove (repeatable)")
+	g.StringArrayVar(&flagUpdateHostAddTemplates, "add-template", nil, "template to link (repeatable)")
+	g.StringArrayVar(&flagUpdateHostRemoveTemplates, "remove-template", nil, "template to unlink (repeatable)")
+	updateCmd.AddCommand(updateHostCmd)
+
+	deleteCmd.AddCommand(deleteHostCmd)
+}
+
+func runCreateHost(_ *cobra.Command, _ []string) error {
+	c, outFmt, _, err := writeClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	if flagCreateHostIP == "" && flagCreateHostDNS == "" {
+		return cliPrintErr(outFmt, "provide --ip or --dns", output.ExitError)
+	}
+
+	groupIDs := make([]string, 0, len(flagCreateHostGroups))
+	for _, grp := range flagCreateHostGroups {
+		id, err := resources.ResolveGroupID(c, grp)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", grp, err), output.ExitNotFound)
+		}
+		groupIDs = append(groupIDs, id)
+	}
+
+	ifaceTypeMap := map[string]int{"agent": 1, "snmp": 2, "ipmi": 3, "jmx": 4}
+	ifaceType, ok := ifaceTypeMap[flagCreateHostIfaceType]
+	if !ok {
+		return cliPrintErr(outFmt, "invalid --interface-type; use agent|snmp|ipmi|jmx", output.ExitError)
+	}
+	useIP := 0
+	if flagCreateHostIP != "" {
+		useIP = 1
+	}
+
+	in := resources.CreateHostInput{
+		Host:        flagCreateHostName,
+		VisibleName: flagCreateHostVisibleName,
+		Description: flagCreateHostDescription,
+		GroupIDs:    groupIDs,
+		Interface: resources.InterfaceInput{
+			Type:          ifaceType,
+			UseIP:         useIP,
+			IP:            flagCreateHostIP,
+			DNS:           flagCreateHostDNS,
+			Port:          flagCreateHostPort,
+			SNMPVersion:   flagCreateHostSNMPVersion,
+			SNMPCommunity: flagCreateHostSNMPCommunity,
+		},
+	}
+
+	if !confirm(fmt.Sprintf("create host %q?", flagCreateHostName)) {
+		fmt.Fprintln(os.Stderr, "cancelled")
+		return nil
+	}
+
+	host, err := resources.CreateHost(c, in)
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	if outFmt == output.FormatTable {
+		fmt.Printf("created host %s (id: %s)\n", host.Host, host.HostID)
+		return nil
+	}
+	return printWriteResult(outFmt, map[string]any{
+		"hostid": host.HostID,
+		"host":   host.Host,
+		"name":   host.Name,
+		"status": hostStatusLabel(host.Status),
+	})
+}
+
+func runUpdateHost(_ *cobra.Command, args []string) error {
+	c, outFmt, _, err := writeClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	if flagUpdateHostVisibleName == "" && flagUpdateHostDescription == "" &&
+		len(flagUpdateHostAddGroups) == 0 && len(flagUpdateHostRemoveGroups) == 0 &&
+		len(flagUpdateHostAddTemplates) == 0 && len(flagUpdateHostRemoveTemplates) == 0 {
+		return cliPrintErr(outFmt, "no update flags provided; nothing to do", output.ExitError)
+	}
+
+	hostID, err := resources.ResolveHostID(c, args[0])
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+	}
+
+	in := resources.UpdateHostInput{
+		HostID:      hostID,
+		VisibleName: flagUpdateHostVisibleName,
+		Description: flagUpdateHostDescription,
+	}
+
+	for _, grp := range flagUpdateHostAddGroups {
+		id, err := resources.ResolveGroupID(c, grp)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", grp, err), output.ExitNotFound)
+		}
+		in.AddGroupIDs = append(in.AddGroupIDs, id)
+	}
+	for _, grp := range flagUpdateHostRemoveGroups {
+		id, err := resources.ResolveGroupID(c, grp)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", grp, err), output.ExitNotFound)
+		}
+		in.RemoveGroupIDs = append(in.RemoveGroupIDs, id)
+	}
+	for _, t := range flagUpdateHostAddTemplates {
+		id, err := resources.ResolveTemplateID(c, t)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("template %q: %s", t, err), output.ExitNotFound)
+		}
+		in.AddTemplateIDs = append(in.AddTemplateIDs, id)
+	}
+	for _, t := range flagUpdateHostRemoveTemplates {
+		id, err := resources.ResolveTemplateID(c, t)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("template %q: %s", t, err), output.ExitNotFound)
+		}
+		in.RemoveTemplateIDs = append(in.RemoveTemplateIDs, id)
+	}
+
+	if !confirm(fmt.Sprintf("update host %q?", args[0])) {
+		fmt.Fprintln(os.Stderr, "cancelled")
+		return nil
+	}
+
+	host, err := resources.UpdateHost(c, in)
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	if outFmt == output.FormatTable {
+		fmt.Printf("updated host %s (id: %s)\n", host.Host, host.HostID)
+		return nil
+	}
+	return printWriteResult(outFmt, map[string]any{
+		"hostid": host.HostID,
+		"host":   host.Host,
+		"name":   host.Name,
+		"status": hostStatusLabel(host.Status),
+	})
+}
+
+func runDeleteHost(_ *cobra.Command, args []string) error {
+	c, outFmt, _, err := writeClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	host, err := resources.GetHost(c, args[0])
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+	}
+
+	if !confirm(fmt.Sprintf("delete host %q (id: %s)?", host.Host, host.HostID)) {
+		fmt.Fprintln(os.Stderr, "cancelled")
+		return nil
+	}
+
+	_, err = resources.DeleteHost(c, host.HostID)
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	if outFmt == output.FormatTable {
+		fmt.Printf("deleted host %s (id: %s)\n", host.Host, host.HostID)
+		return nil
+	}
+	return printWriteResult(outFmt, map[string]any{
+		"hostid": host.HostID,
+		"host":   host.Host,
+		"name":   host.Name,
+		"status": hostStatusLabel(host.Status),
+	})
+}
