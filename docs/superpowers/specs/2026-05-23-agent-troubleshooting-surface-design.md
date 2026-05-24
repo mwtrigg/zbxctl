@@ -18,6 +18,112 @@ Six additions targeted at agent-driven troubleshooting workflows:
 
 Deferred to later: `get audit`, `get proxies`.
 
+Also covers: context permission tiers and the script execution threat model.
+
+---
+
+## Security Model
+
+### The trust boundary
+
+Credentials stored in `~/.config/zbxctl/config.yaml` are readable by any
+process with filesystem access to that file. zbxctl's permission model does not
+change this. The operator who configures a context is the trust root — the
+model limits blast radius and makes intent explicit, but is not a cryptographic
+guarantee.
+
+### Permission tiers
+
+Each context declares a `permissions` field. zbxctl enforces this at the CLI
+layer regardless of what the API token is capable of.
+
+| Tier | Permitted commands |
+|---|---|
+| `readonly` | All `get` commands, `auth`, `context`, `llm`, `diagnose`, `version`, `upgrade` |
+| `operator` | `readonly` + `acknowledge`, `maintenance create/delete`, `enable`/`disable` host/trigger |
+| `write` | `operator` + `create host`, `update host`, `delete host` |
+
+Default when `permissions` is unset: `write` (preserves current behaviour for
+human operator contexts).
+
+**Recommended agent context:** `operator`. Agents can triage, acknowledge, and
+manage maintenance windows. They cannot modify host inventory.
+
+### Script execution is a separate axis
+
+`run script` is not part of any permission tier. It is controlled exclusively
+by `allowed_scripts` in the context config:
+
+- Field absent or empty list → `run script` is blocked, period.
+- Non-empty list → only named scripts may be executed.
+
+No permission tier, including `write`, unlocks scripts. They must be explicitly
+allowlisted by a human operator.
+
+```yaml
+contexts:
+  prod-agent:
+    url: https://zabbix.example.com
+    api_token: read-only-token
+    permissions: operator
+    # allowed_scripts absent — run script is blocked
+
+  prod-ops:
+    url: https://zabbix.example.com
+    api_token: readwrite-token
+    permissions: write
+    allowed_scripts:
+      - "Ping"
+      - "Traceroute"
+      - "Check disk space"
+```
+
+### Strong recommendations (documented in README and `llm capabilities`)
+
+1. **Use a Zabbix-level read-only API token for agent contexts.** zbxctl's
+   permission tier is a second layer — if it is bypassed, the token itself
+   should be incapable of write operations. Defense in depth.
+
+2. **Do not store elevated tokens in agent-accessible config files.** Keep
+   `write`-tier contexts in a separate config file with restricted permissions
+   (`chmod 600`, owned by the operator user, not readable by the agent service
+   account).
+
+3. **`run script` is the only zbxctl command that executes code on a monitored
+   host.** Treat it with the same caution as SSH access to that host. Allowlist
+   only pre-reviewed diagnostic scripts (ping, traceroute, read-only checks).
+   Never allowlist scripts that modify state, install packages, or delete files.
+
+### `run script` guardrails (implementation requirements)
+
+- `--yes` flag has **no effect** on `run script`. It is intentionally excluded.
+- Always prints script name, type, execute_on target, and full command body
+  before prompting, with no flag to suppress this output.
+- Requires typing a short random confirmation token (6 alphanumeric chars,
+  60-second TTL) rather than `y/N`. Token is generated fresh each invocation.
+- If `allowed_scripts` is not configured for the active context, exits with
+  code 1 and an explicit message before making any API call.
+- `run script` is marked `"dangerous": true` in the LLM manifest so agents
+  see the risk signal in `llm capabilities`.
+
+### LLM manifest extension
+
+Add a `dangerous` field to `CommandSchema`:
+
+```go
+type CommandSchema struct {
+    Command      string       `json:"command"`
+    Description  string       `json:"description"`
+    Flags        []FlagSchema `json:"flags"`
+    OutputFields []string     `json:"output_fields"`
+    Examples     []string     `json:"examples"`
+    Dangerous    bool         `json:"dangerous,omitempty"`
+}
+```
+
+Only `run script` sets `dangerous: true` in this version. The field is omitted
+(not `false`) for all other commands to keep the manifest compact.
+
 ---
 
 ## Guiding Principle (same as prior spec)
