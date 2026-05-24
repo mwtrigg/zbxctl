@@ -70,8 +70,11 @@ func runDisableHost(cmd *cobra.Command, args []string) error {
 }
 
 func runSetHostStatus(idOrName string, enable bool) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("operator"); err != nil {
 		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
@@ -143,8 +146,11 @@ func runDisableTrigger(cmd *cobra.Command, args []string) error {
 }
 
 func runSetTriggerStatus(id string, enable bool) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("operator"); err != nil {
 		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
@@ -216,8 +222,11 @@ func init() {
 }
 
 func runAcknowledge(cmd *cobra.Command, args []string) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("operator"); err != nil {
 		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
@@ -288,8 +297,11 @@ func init() {
 }
 
 func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("operator"); err != nil {
 		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
@@ -379,8 +391,11 @@ var maintenanceDeleteCmd = &cobra.Command{
 }
 
 func runMaintenanceDelete(cmd *cobra.Command, args []string) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("operator"); err != nil {
 		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
@@ -567,9 +582,12 @@ func init() {
 }
 
 func runCreateHost(_ *cobra.Command, _ []string) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
 		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("write"); err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
 	if flagCreateHostIP == "" && flagCreateHostDNS == "" {
@@ -634,9 +652,12 @@ func runCreateHost(_ *cobra.Command, _ []string) error {
 }
 
 func runUpdateHost(_ *cobra.Command, args []string) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
 		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("write"); err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
 	if flagUpdateHostVisibleName == "" && flagUpdateHostDescription == "" &&
@@ -708,9 +729,12 @@ func runUpdateHost(_ *cobra.Command, args []string) error {
 }
 
 func runDeleteHost(_ *cobra.Command, args []string) error {
-	c, outFmt, _, err := writeClient()
+	c, outFmt, ctx, err := writeClient()
 	if err != nil {
 		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+	if err := ctx.CheckPermission("write"); err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
 	host, err := resources.GetHost(c, args[0])

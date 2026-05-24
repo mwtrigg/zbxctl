@@ -17,14 +17,56 @@ type Config struct {
 
 // Context holds per-context connection settings.
 type Context struct {
-	URL          string `yaml:"url"`
-	APIToken     string `yaml:"api_token"`
-	Username     string `yaml:"username"`
-	Password     string `yaml:"password"`
-	TLSVerify    *bool  `yaml:"tls_verify"`   // nil = default true
-	CAFile       string `yaml:"ca_file"`
-	Proxy        string `yaml:"proxy"`
-	DefaultLimit int    `yaml:"default_limit"` // default 100
+	URL            string   `yaml:"url"`
+	APIToken       string   `yaml:"api_token"`
+	Username       string   `yaml:"username"`
+	Password       string   `yaml:"password"`
+	TLSVerify      *bool    `yaml:"tls_verify"`      // nil = default true
+	CAFile         string   `yaml:"ca_file"`
+	Proxy          string   `yaml:"proxy"`
+	DefaultLimit   int      `yaml:"default_limit"`   // default 100
+	Permissions    string   `yaml:"permissions"`     // readonly | operator | write; default write
+	AllowedScripts []string `yaml:"allowed_scripts"` // allowlist for run script; absent = blocked
+}
+
+// PermissionError is returned when the context lacks the required permission tier.
+type PermissionError struct {
+	Required string
+	Have     string
+}
+
+func (e *PermissionError) Error() string {
+	return fmt.Sprintf("permission denied: command requires %q tier, context has %q", e.Required, e.Have)
+}
+
+// CheckPermission returns an error if the context's tier does not permit required.
+// An empty Permissions field defaults to "write" (backwards-compatible).
+func (ctx *Context) CheckPermission(required string) error {
+	tier := ctx.Permissions
+	if tier == "" {
+		tier = "write"
+	}
+	if permLevel(tier) < permLevel(required) {
+		have := tier
+		if ctx.Permissions == "" {
+			have = "write (default)"
+		}
+		return &PermissionError{Required: required, Have: have}
+	}
+	return nil
+}
+
+func permLevel(tier string) int {
+	switch tier {
+	case "readonly":
+		return 0
+	case "operator":
+		return 1
+	case "write":
+		return 2
+	default:
+		return 2 // unknown tiers are permissive (human operator use case)
+	}
 }
 
 // defaultConfigPath returns ~/.config/zbxctl/config.yaml.
