@@ -17,6 +17,8 @@ type Item struct {
 	Type      string `json:"type"`
 	ValueType string `json:"value_type"`
 	Status    string `json:"status"`    // "0"=enabled, "1"=disabled
+	State     string `json:"state"`     // "0"=normal, "1"=not_supported
+	Error     string `json:"error"`     // non-empty when state=1
 	LastValue string `json:"lastvalue"`
 	LastClock string `json:"lastclock"` // Unix timestamp string; "0" = never collected
 	Units     string `json:"units"`
@@ -41,6 +43,7 @@ type ItemFilter struct {
 	GroupIDs  []string // filter by host group
 	KeySearch string   // substring search on key_
 	Status    string   // "0"=enabled, "1"=disabled, ""=all
+	State     string   // "0"=normal, "1"=not_supported, ""=all
 	Limit     int
 	WithHost  bool // if true, include host name in output via selectHosts
 }
@@ -48,7 +51,7 @@ type ItemFilter struct {
 // GetItems returns items for the given filter.
 func GetItems(c *api.Client, f ItemFilter) ([]Item, error) {
 	params := map[string]any{
-		"output":    []string{"itemid", "hostid", "name", "key_", "type", "value_type", "status", "lastvalue", "lastclock", "units", "delay"},
+		"output":    []string{"itemid", "hostid", "name", "key_", "type", "value_type", "status", "state", "error", "lastvalue", "lastclock", "units", "delay"},
 		"sortfield": "name",
 		"sortorder": "ASC",
 	}
@@ -66,6 +69,14 @@ func GetItems(c *api.Client, f ItemFilter) ([]Item, error) {
 	}
 	if f.Status != "" {
 		params["filter"] = map[string]any{"status": []string{f.Status}}
+	}
+	if f.State != "" {
+		existing, _ := params["filter"].(map[string]any)
+		if existing == nil {
+			existing = make(map[string]any)
+		}
+		existing["state"] = []string{f.State}
+		params["filter"] = existing
 	}
 	if f.Limit > 0 {
 		params["limit"] = f.Limit
