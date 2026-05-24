@@ -1324,6 +1324,11 @@ func runGetHistoryAroundEvent(c *api.Client, outFmt output.Format, ctx *config.C
 			fmt.Sprintf("invalid --window %q: use 30m, 1h, 2h, or 6h", flagHistoryWindow),
 			output.ExitError)
 	}
+	if windowDur <= 0 {
+		return cliPrintErr(outFmt,
+			fmt.Sprintf("--window must be a positive duration, got %q", flagHistoryWindow),
+			output.ExitError)
+	}
 	half := windowDur / 2
 
 	info, err := resources.GetEventTriggerInfo(c, flagHistoryAroundEvent)
@@ -1373,7 +1378,7 @@ func runGetHistoryAroundEvent(c *api.Client, outFmt output.Format, ctx *config.C
 		}
 	}
 
-	if outFmt == output.FormatJSON || outFmt == output.FormatJSONL {
+	if outFmt == output.FormatJSONL {
 		meta := map[string]any{
 			"event_id":    info.EventID,
 			"event_clock": fmtUnix(fmt.Sprintf("%d", info.Clock)),
