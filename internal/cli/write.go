@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bufio"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"strings"
 	"time"
@@ -762,4 +764,155 @@ func runDeleteHost(_ *cobra.Command, args []string) error {
 		"name":   host.Name,
 		"status": hostStatusLabel(host.Status),
 	})
+}
+
+// generateToken returns a 6-character random alphanumeric string for run script confirmation.
+func generateToken() string {
+	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 6)
+	for i := range b {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		b[i] = chars[n.Int64()]
+	}
+	return string(b)
+}
+
+// ── run script ────────────────────────────────────────────────────────────────
+
+var runScriptHost string
+
+var runScriptCmd = &cobra.Command{
+	Use:   "script <name-or-id>",
+	Short: "Execute a Zabbix script on a host",
+	Long: `Execute a script from the Zabbix script library on a monitored host.
+
+SECURITY: This command executes code on a monitored host. It requires:
+  - allowed_scripts in the active context config (run script is blocked otherwise)
+  - Manual token confirmation (--yes has no effect on this command)
+
+Recommended: use a read-only API token for agent contexts. Enable run script
+only for pre-reviewed diagnostic scripts (ping, traceroute, read-only checks).`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRunScript,
+}
+
+var runCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Execute remote operations",
+}
+
+func init() {
+	runScriptCmd.Flags().StringVar(&runScriptHost, "host", "", "host name or ID (required)")
+	_ = runScriptCmd.MarkFlagRequired("host")
+	runCmd.AddCommand(runScriptCmd)
+}
+
+func runRunScript(_ *cobra.Command, args []string) error {
+	c, outFmt, ctx, err := writeClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	// allowed_scripts check — independent of permission tier.
+	if len(ctx.AllowedScripts) == 0 {
+		return cliPrintErr(outFmt,
+			"run script is blocked: context has no allowed_scripts configured\n"+
+				"Add allowed_scripts to this context in ~/.config/zbxctl/config.yaml",
+			output.ExitError)
+	}
+
+	nameOrID := args[0]
+
+	// Resolve host.
+	hostID, err := resources.ResolveHostID(c, runScriptHost)
+	if err != nil {
+		var nfe *resources.NotFoundError
+		if errors.As(err, &nfe) {
+			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+		}
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	// Resolve script.
+	script, err := resources.GetScriptByNameOrID(c, nameOrID, hostID)
+	if err != nil {
+		var nfe *resources.NotFoundError
+		if errors.As(err, &nfe) {
+			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+		}
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	// Check against allowed_scripts allowlist.
+	allowed := false
+	for _, name := range ctx.AllowedScripts {
+		if name == script.Name {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return cliPrintErr(outFmt,
+			fmt.Sprintf("script %q is not in allowed_scripts for this context", script.Name),
+			output.ExitError)
+	}
+
+	// Always print script details — no flag can suppress this output.
+	fmt.Fprintf(os.Stderr, "\n  Script execution details:\n")
+	fmt.Fprintf(os.Stderr, "   Script:     %s (id: %s)\n", script.Name, script.ScriptID)
+	fmt.Fprintf(os.Stderr, "   Type:       %s\n", resources.ScriptTypeLabel(script.Type))
+	fmt.Fprintf(os.Stderr, "   Execute on: %s\n", resources.ExecuteOnLabel(script.ExecuteOn))
+	fmt.Fprintf(os.Stderr, "   Host:       %s (id: %s)\n", runScriptHost, hostID)
+	if script.Command != "" {
+		fmt.Fprintf(os.Stderr, "   Command:\n")
+		for _, line := range strings.Split(script.Command, "\n") {
+			fmt.Fprintf(os.Stderr, "     %s\n", line)
+		}
+	}
+	fmt.Fprintln(os.Stderr)
+
+	// Token confirmation — --yes has no effect.
+	token := generateToken()
+	deadline := time.Now().Add(60 * time.Second)
+	fmt.Fprintf(os.Stderr, "Confirmation token (expires in 60s): %s\n", token)
+	fmt.Fprintf(os.Stderr, "Type the token above to execute: ")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		fmt.Fprintln(os.Stderr, "\naborted")
+		return &cliErr{code: output.ExitError}
+	}
+	input := strings.TrimSpace(scanner.Text())
+	if time.Now().After(deadline) {
+		return cliPrintErr(outFmt, "token expired (60s TTL exceeded)", output.ExitError)
+	}
+	if input != token {
+		return cliPrintErr(outFmt, "token mismatch: aborted", output.ExitError)
+	}
+
+	// Execute.
+	result, err := resources.RunScript(c, script.ScriptID, hostID)
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	// Populate readable host/script name on result.
+	result.ScriptName = script.Name
+	result.Host = runScriptHost
+
+	return output.Print(outFmt, []output.Column{
+		{Key: "scriptid", Header: "SCRIPT_ID"},
+		{Key: "script_name", Header: "SCRIPT"},
+		{Key: "hostid", Header: "HOST_ID"},
+		{Key: "host", Header: "HOST"},
+		{Key: "response", Header: "RESPONSE"},
+		{Key: "value", Header: "OUTPUT"},
+	}, []map[string]any{{
+		"scriptid":    result.ScriptID,
+		"script_name": result.ScriptName,
+		"hostid":      result.HostID,
+		"host":        result.Host,
+		"response":    result.Response,
+		"value":       result.Value,
+	}})
 }
