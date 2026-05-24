@@ -1098,6 +1098,141 @@ func runGetUserGroups(cmd *cobra.Command, args []string) error {
 	return output.Print(outFmt, cols, rows)
 }
 
+// ── get history ───────────────────────────────────────────────────────────────
+
+var (
+	flagHistoryItem   string
+	flagHistoryHosts  []string
+	flagHistoryGroups []string
+	flagHistorySince  string
+	flagHistoryUntil  string
+	flagHistoryLimit  int
+)
+
+var historyCmd = &cobra.Command{
+	Use:   "history",
+	Short: "Fetch time-series metric history",
+	RunE:  runGetHistory,
+}
+
+func init() {
+	f := historyCmd.Flags()
+	f.StringVar(&flagHistoryItem, "item", "", "item key pattern or numeric item ID (required)")
+	f.StringArrayVar(&flagHistoryHosts, "host", nil, "filter by host name or ID (repeatable)")
+	f.StringArrayVar(&flagHistoryGroups, "group", nil, "filter by host group name or ID (repeatable)")
+	f.StringVar(&flagHistorySince, "since", "", "start time: unix timestamp, RFC3339, or YYYY-MM-DD")
+	f.StringVar(&flagHistoryUntil, "until", "", "end time: unix timestamp, RFC3339, or YYYY-MM-DD")
+	f.IntVar(&flagHistoryLimit, "limit", 0, "max results")
+	_ = historyCmd.MarkFlagRequired("item")
+	getCmd.AddCommand(historyCmd)
+}
+
+// isNumericStr reports whether s is a non-empty string of ASCII digits only.
+func isNumericStr(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func runGetHistory(_ *cobra.Command, _ []string) error {
+	c, outFmt, ctx, err := newClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	// Non-numeric item key requires at least one host or group for resolution.
+	if !isNumericStr(flagHistoryItem) && len(flagHistoryHosts) == 0 && len(flagHistoryGroups) == 0 {
+		return cliPrintErr(outFmt, "non-numeric --item requires at least one --host or --group for resolution", output.ExitError)
+	}
+
+	// Resolve host IDs.
+	var hostIDs []string
+	for _, h := range flagHistoryHosts {
+		id, err := resources.ResolveHostID(c, h)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("host %q: %s", h, err), output.ExitNotFound)
+		}
+		hostIDs = append(hostIDs, id)
+	}
+
+	// Resolve group IDs.
+	var groupIDs []string
+	for _, g := range flagHistoryGroups {
+		id, err := resources.ResolveGroupID(c, g)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", g, err), output.ExitNotFound)
+		}
+		groupIDs = append(groupIDs, id)
+	}
+
+	var since, until int64
+	if flagHistorySince != "" {
+		ts, err := parseTimestamp(flagHistorySince)
+		if err != nil {
+			return cliPrintErr(outFmt, "invalid --since: "+err.Error(), output.ExitError)
+		}
+		since = ts
+	}
+	if flagHistoryUntil != "" {
+		ts, err := parseTimestamp(flagHistoryUntil)
+		if err != nil {
+			return cliPrintErr(outFmt, "invalid --until: "+err.Error(), output.ExitError)
+		}
+		until = ts
+	}
+
+	q := resources.HistoryQuery{
+		HostIDs:   hostIDs,
+		GroupIDs:  groupIDs,
+		KeySearch: flagHistoryItem,
+		TimeFrom:  since,
+		TimeTill:  until,
+		Limit:     effectiveLimit(flagHistoryLimit, ctx),
+	}
+	if isNumericStr(flagHistoryItem) {
+		q.ItemIDs = []string{flagHistoryItem}
+		q.KeySearch = ""
+	}
+
+	records, err := resources.GetHistory(c, q)
+	if err != nil {
+		var nfe *resources.NotFoundError
+		if errors.As(err, &nfe) {
+			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+		}
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	cols := []output.Column{
+		{Key: "host", Header: "HOST"},
+		{Key: "hostid", Header: "HOSTID"},
+		{Key: "itemid", Header: "ITEMID"},
+		{Key: "key_", Header: "KEY"},
+		{Key: "clock", Header: "TIME"},
+		{Key: "clock_unix", Header: "CLOCK_UNIX"},
+		{Key: "value", Header: "VALUE"},
+	}
+	rows := make([]map[string]any, len(records))
+	for i, r := range records {
+		rows[i] = map[string]any{
+			"host":       r.Host,
+			"hostid":     r.HostID,
+			"itemid":     r.ItemID,
+			"key_":       r.Key,
+			"clock":      fmtUnix(r.Clock),
+			"clock_unix": r.ClockUnix,
+			"value":      r.Value,
+		}
+	}
+	return output.Print(outFmt, cols, rows)
+}
+
 // ── severity parsing ──────────────────────────────────────────────────────────
 
 // parseSeverity converts a severity name or integer string to a Zabbix severity
