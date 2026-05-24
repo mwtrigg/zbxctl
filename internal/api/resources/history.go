@@ -71,11 +71,15 @@ func GetHistory(c *api.Client, q HistoryQuery) ([]HistoryRecord, error) {
 	}
 
 	if len(refs) == 0 {
-		return nil, &NotFoundError{Resource: "item", Query: q.KeySearch}
+		query := q.KeySearch
+		if query == "" && len(q.ItemIDs) > 0 {
+			query = q.ItemIDs[0]
+		}
+		return nil, &NotFoundError{Resource: "item", Query: query}
 	}
 
 	groups := groupByValueType(refs)
-	var all []HistoryRecord
+	var perGroup [][]HistoryRecord
 
 	for vt, group := range groups {
 		ids := make([]string, len(group))
@@ -86,15 +90,15 @@ func GetHistory(c *api.Client, q HistoryQuery) ([]HistoryRecord, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Build lookup map for enrichment.
 		refMap := make(map[string]itemRef, len(group))
 		for _, r := range group {
 			refMap[r.ItemID] = r
 		}
+		var groupRecords []HistoryRecord
 		for _, r := range raw {
 			ref := refMap[r.ItemID]
 			ts, _ := strconv.ParseInt(r.Clock, 10, 64)
-			all = append(all, HistoryRecord{
+			groupRecords = append(groupRecords, HistoryRecord{
 				ItemID:    r.ItemID,
 				HostID:    ref.HostID,
 				Host:      ref.Host,
@@ -104,9 +108,10 @@ func GetHistory(c *api.Client, q HistoryQuery) ([]HistoryRecord, error) {
 				Value:     r.Value,
 			})
 		}
+		perGroup = append(perGroup, groupRecords)
 	}
 
-	return mergeAndSort(all), nil
+	return mergeAndSort(perGroup...), nil
 }
 
 // resolveItemRefs calls item.get to get itemids, hostids, host names, keys, and value_types.
