@@ -75,6 +75,7 @@ func init() {
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(deleteCmd)
+	rootCmd.AddCommand(diagnoseCmd)
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(upgradeCmd)
