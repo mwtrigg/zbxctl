@@ -767,14 +767,17 @@ func runDeleteHost(_ *cobra.Command, args []string) error {
 }
 
 // generateToken returns a 6-character random alphanumeric string for run script confirmation.
-func generateToken() string {
+func generateToken() (string, error) {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 6)
 	for i := range b {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			return "", fmt.Errorf("reading from CSPRNG: %w", err)
+		}
 		b[i] = chars[n.Int64()]
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // ── run script ────────────────────────────────────────────────────────────────
@@ -843,18 +846,17 @@ func runRunScript(_ *cobra.Command, args []string) error {
 		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
 
-	// Check against allowed_scripts allowlist.
+	// Check against allowed_scripts allowlist (match on name or ID).
 	allowed := false
-	for _, name := range ctx.AllowedScripts {
-		if name == script.Name {
+	for _, s := range ctx.AllowedScripts {
+		if s == script.Name || s == script.ScriptID {
 			allowed = true
 			break
 		}
 	}
 	if !allowed {
-		return cliPrintErr(outFmt,
-			fmt.Sprintf("script %q is not in allowed_scripts for this context", script.Name),
-			output.ExitError)
+		fmt.Fprintf(os.Stderr, "error: script %q is not in allowed_scripts for this context\n", script.Name)
+		return &cliErr{code: output.ExitError}
 	}
 
 	// Always print script details — no flag can suppress this output.
@@ -872,7 +874,10 @@ func runRunScript(_ *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stderr)
 
 	// Token confirmation — --yes has no effect.
-	token := generateToken()
+	token, err := generateToken()
+	if err != nil {
+		return fmt.Errorf("generating confirmation token: %w", err)
+	}
 	deadline := time.Now().Add(60 * time.Second)
 	fmt.Fprintf(os.Stderr, "Confirmation token (expires in 60s): %s\n", token)
 	fmt.Fprintf(os.Stderr, "Type the token above to execute: ")
