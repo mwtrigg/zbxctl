@@ -71,6 +71,11 @@ func init() {
 	rootCmd.AddCommand(disableCmd)
 	rootCmd.AddCommand(acknowledgeCmd)
 	rootCmd.AddCommand(maintenanceCmd)
+	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(llmCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(upgradeCmd)
+	rootCmd.AddCommand(versionCmd)
 }
