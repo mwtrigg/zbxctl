@@ -106,7 +106,7 @@ func RunScript(c *api.Client, scriptID, hostID string) (*ScriptResult, error) {
 	}, nil
 }
 
-func scriptTypeLabel(s string) string {
+func ScriptTypeLabel(s string) string {
 	switch s {
 	case "0":
 		return "script"
@@ -123,7 +123,7 @@ func scriptTypeLabel(s string) string {
 	}
 }
 
-func executeOnLabel(s string) string {
+func ExecuteOnLabel(s string) string {
 	switch s {
 	case "0":
 		return "server"

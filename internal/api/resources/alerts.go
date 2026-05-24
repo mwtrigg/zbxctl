@@ -126,7 +126,7 @@ func resolveEventHosts(c *api.Client, eventIDs []string) (map[string]EventHost, 
 	return m, nil
 }
 
-func alertStatusLabel(s string) string {
+func AlertStatusLabel(s string) string {
 	switch s {
 	case "0":
 		return "not_sent"

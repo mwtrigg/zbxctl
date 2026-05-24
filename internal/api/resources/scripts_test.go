@@ -12,8 +12,8 @@ func TestScriptTypeLabel(t *testing.T) {
 		{"99", "99"},
 	}
 	for _, tt := range tests {
-		if got := scriptTypeLabel(tt.in); got != tt.want {
-			t.Errorf("scriptTypeLabel(%q) = %q, want %q", tt.in, got, tt.want)
+		if got := ScriptTypeLabel(tt.in); got != tt.want {
+			t.Errorf("ScriptTypeLabel(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
@@ -26,8 +26,8 @@ func TestExecuteOnLabel(t *testing.T) {
 		{"99", "99"},
 	}
 	for _, tt := range tests {
-		if got := executeOnLabel(tt.in); got != tt.want {
-			t.Errorf("executeOnLabel(%q) = %q, want %q", tt.in, got, tt.want)
+		if got := ExecuteOnLabel(tt.in); got != tt.want {
+			t.Errorf("ExecuteOnLabel(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
