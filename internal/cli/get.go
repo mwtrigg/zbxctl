@@ -1156,7 +1156,11 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 	for _, h := range flagHistoryHosts {
 		id, err := resources.ResolveHostID(c, h)
 		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("host %q: %s", h, err), output.ExitNotFound)
+			var nfe *resources.NotFoundError
+			if errors.As(err, &nfe) {
+				return cliPrintErr(outFmt, fmt.Sprintf("host %q: %s", h, err), output.ExitNotFound)
+			}
+			return cliPrintErr(outFmt, fmt.Sprintf("host %q: %s", h, err), output.ExitError)
 		}
 		hostIDs = append(hostIDs, id)
 	}
@@ -1166,7 +1170,11 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 	for _, g := range flagHistoryGroups {
 		id, err := resources.ResolveGroupID(c, g)
 		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", g, err), output.ExitNotFound)
+			var nfe *resources.NotFoundError
+			if errors.As(err, &nfe) {
+				return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", g, err), output.ExitNotFound)
+			}
+			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", g, err), output.ExitError)
 		}
 		groupIDs = append(groupIDs, id)
 	}
