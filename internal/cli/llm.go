@@ -15,6 +15,7 @@ type CommandSchema struct {
 	Flags        []FlagSchema `json:"flags"`
 	OutputFields []string     `json:"output_fields"`
 	Examples     []string     `json:"examples"`
+	Dangerous    bool         `json:"dangerous,omitempty"`
 }
 
 // FlagSchema describes a single flag.
@@ -79,15 +80,16 @@ var capabilities = []CommandSchema{
 	},
 	{
 		Command:     "get items",
-		Description: "List items (metrics) for a host. Host argument accepts ID or technical name.",
+		Description: "List items (metrics) for a host. --state unsupported surfaces items where Zabbix cannot collect data (broken monitoring, not real problems). --state normal returns only healthy items.",
 		Flags: append(globalFlags(),
 			FlagSchema{Name: "key", Type: "string", Description: "Substring search on item key.", Required: false, Default: ""},
 			FlagSchema{Name: "status", Type: "string", Description: "Filter by status: enabled|disabled.", Required: false, Default: ""},
+			FlagSchema{Name: "state", Type: "string", Description: "Filter by collection state: normal|unsupported. Use unsupported to find broken items.", Required: false, Default: ""},
 			FlagSchema{Name: "limit", Type: "int", Description: "Maximum results.", Required: false, Default: 0},
 		),
-		OutputFields: []string{"itemid", "hostid", "name", "key_", "type", "value_type", "status", "status_raw", "lastvalue", "lastclock", "lastclock_unix", "units", "delay"},
+		OutputFields: []string{"itemid", "hostid", "name", "key_", "type", "value_type", "status", "status_raw", "state", "state_raw", "error", "lastvalue", "lastclock", "lastclock_unix", "units", "delay"},
 		Examples: []string{
-			"zbxctl get items web-server-01",
+			"zbxctl get items web-server-01 --state unsupported --output jsonl",
 			"zbxctl get items 10001 --key cpu --status enabled --output jsonl",
 		},
 	},
@@ -324,20 +326,22 @@ var capabilities = []CommandSchema{
 	},
 	{
 		Command:     "get history",
-		Description: "Fetch time-series metric history. Resolves items from hosts/groups by key pattern, then fetches history. Always includes host and hostid in output.",
+		Description: "Fetch time-series metric history. Resolves items from hosts/groups by key pattern, then fetches history. Use --around-event to automatically anchor the time window to a specific event. Always includes host and hostid in output.",
 		Flags: append(globalFlags(),
-			FlagSchema{Name: "item", Type: "string", Description: "Item key pattern or numeric item ID (required).", Required: true, Default: ""},
+			FlagSchema{Name: "item", Type: "string", Description: "Item key pattern or numeric item ID (required unless using --around-event).", Required: false, Default: ""},
 			FlagSchema{Name: "host", Type: "string", Description: "Host name or ID — repeatable, combinable with --group.", Required: false, Default: ""},
 			FlagSchema{Name: "group", Type: "string", Description: "Host group name or ID — repeatable.", Required: false, Default: ""},
 			FlagSchema{Name: "since", Type: "string", Description: "Start time: unix timestamp, RFC3339, or YYYY-MM-DD.", Required: false, Default: ""},
 			FlagSchema{Name: "until", Type: "string", Description: "End time: unix timestamp, RFC3339, or YYYY-MM-DD.", Required: false, Default: ""},
+			FlagSchema{Name: "around-event", Type: "string", Description: "Event ID to anchor query: resolves host and centers window on event clock.", Required: false, Default: ""},
+			FlagSchema{Name: "window", Type: "string", Description: "Time window for --around-event: 30m|1h|2h|6h. Default: 1h (±30m).", Required: false, Default: "1h"},
 			FlagSchema{Name: "limit", Type: "int", Description: "Maximum results.", Required: false, Default: 0},
 		),
 		OutputFields: []string{"host", "hostid", "itemid", "key_", "clock", "clock_unix", "value"},
 		Examples: []string{
-			"zbxctl get history --item cpu.load[1] --host web-01",
-			"zbxctl get history --item cpu.load[1] --group 'Linux servers' --since 2026-05-01 --output jsonl",
-			"zbxctl get history --item cpu.load[1] --host web-01 --host web-02 --since 2026-05-20T00:00:00Z --until 2026-05-21T00:00:00Z",
+			"zbxctl get history --item system.cpu.load --host web-server-01 --since 2026-05-01",
+			"zbxctl get history --around-event 208317877 --window 1h --output jsonl",
+			"zbxctl get history --item agent.ping --group 'Linux servers' --since 2026-05-20",
 		},
 	},
 	{
@@ -427,6 +431,70 @@ var capabilities = []CommandSchema{
 		Flags:       []FlagSchema{},
 		OutputFields: []string{},
 		Examples:    []string{"zbxctl llm schema 'get hosts'"},
+	},
+	{
+		Command:     "get scripts",
+		Description: "List Zabbix scripts visible to the authenticated user. Use --host to filter to scripts applicable to a specific host.",
+		Flags: append(globalFlags(),
+			FlagSchema{Name: "host", Type: "string", Description: "Filter to scripts applicable to this host (name or ID).", Required: false, Default: ""},
+		),
+		OutputFields: []string{"scriptid", "name", "type", "type_raw", "execute_on", "execute_on_raw", "description", "command"},
+		Examples: []string{
+			"zbxctl get scripts",
+			"zbxctl get scripts --host web-server-01 --output jsonl",
+		},
+	},
+	{
+		Command:     "run script",
+		Description: "Execute a Zabbix script on a host. DANGEROUS: executes code on the monitored host. Requires allowed_scripts in context config. Always prompts with a token — --yes has no effect.",
+		Flags: append(globalFlags(),
+			FlagSchema{Name: "host", Type: "string", Description: "Host name or ID (required).", Required: true, Default: ""},
+		),
+		OutputFields: []string{"scriptid", "script_name", "hostid", "host", "response", "value"},
+		Examples: []string{
+			"zbxctl run script Ping --host web-server-01",
+			"zbxctl run script 'Check disk space' --host db-01 --output json",
+		},
+		Dangerous: true,
+	},
+	{
+		Command:     "get alerts",
+		Description: "List notification alerts — who was paged, via which media, and delivery status. Useful for determining whether humans are already aware of an incident.",
+		Flags: append(globalFlags(),
+			FlagSchema{Name: "host", Type: "string", Description: "Filter by host name or ID.", Required: false, Default: ""},
+			FlagSchema{Name: "event", Type: "string", Description: "Filter by event ID.", Required: false, Default: ""},
+			FlagSchema{Name: "since", Type: "string", Description: "Alerts after this time: unix timestamp, RFC3339, or YYYY-MM-DD.", Required: false, Default: ""},
+			FlagSchema{Name: "status", Type: "string", Description: "Filter by delivery status: sent|failed.", Required: false, Default: ""},
+			FlagSchema{Name: "limit", Type: "int", Description: "Maximum results.", Required: false, Default: 0},
+		),
+		OutputFields: []string{"alertid", "eventid", "hostid", "host", "clock", "clock_unix", "sendto", "subject", "status", "status_raw", "error", "userid", "mediatypeid"},
+		Examples: []string{
+			"zbxctl get alerts --host web-server-01 --output jsonl",
+			"zbxctl get alerts --event 208317877",
+			"zbxctl get alerts --status failed --since 2026-05-01",
+		},
+	},
+	{
+		Command:      "get interfaces",
+		Description:  "Show all network interfaces Zabbix has configured for a host, their availability state, and connection errors. Answers 'is Zabbix reaching the right IP?' and 'why is the agent unavailable?'",
+		Flags:        globalFlags(),
+		OutputFields: []string{"interfaceid", "hostid", "host", "type", "type_raw", "main", "useip", "ip", "dns", "port", "available", "available_raw", "error", "snmp_version", "snmp_community", "snmp_securityname"},
+		Examples: []string{
+			"zbxctl get interfaces web-server-01",
+			"zbxctl get interfaces 10001 --output json",
+		},
+	},
+	{
+		Command:     "diagnose host",
+		Description: "Single-call composite snapshot for agent-driven triage. Returns open problems, recent events, latest metric values, broken items, and interface availability. Always JSON or JSONL.",
+		Flags: append(globalFlags(),
+			FlagSchema{Name: "since", Type: "string", Description: "Event window before now (e.g. 1h, 6h, 24h). Default: 24h.", Required: false, Default: "24h"},
+		),
+		OutputFields: []string{"host{hostid,host,name,status,available}", "open_problems[]", "recent_events[]", "latestdata[]", "broken_items[]", "meta{host,since,generated_at}"},
+		Examples: []string{
+			"zbxctl diagnose host web-server-01 --output json",
+			"zbxctl diagnose host 10001 --since 6h --output jsonl",
+		},
 	},
 }
 
