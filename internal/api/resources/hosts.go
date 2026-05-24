@@ -234,6 +234,12 @@ type CreateHostInput struct {
 
 // CreateHost creates a new Zabbix host and returns the created host record.
 func CreateHost(c *api.Client, in CreateHostInput) (*Host, error) {
+	if in.Host == "" {
+		return nil, fmt.Errorf("Host is required")
+	}
+	if len(in.GroupIDs) == 0 {
+		return nil, fmt.Errorf("at least one GroupID is required")
+	}
 	groups := make([]map[string]string, len(in.GroupIDs))
 	for i, id := range in.GroupIDs {
 		groups[i] = map[string]string{"groupid": id}
@@ -304,7 +310,7 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 	params := map[string]any{
 		"output":                []string{"hostid", "host", "name", "status"},
 		"hostids":               []string{in.HostID},
-		"selectGroups":          []string{"groupid"},
+		"selectHostGroups":      []string{"groupid"},
 		"selectParentTemplates": []string{"templateid"},
 	}
 	raw, err := c.Call("host.get", params)
@@ -316,7 +322,7 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 		Host      string              `json:"host"`
 		Name      string              `json:"name"`
 		Status    string              `json:"status"`
-		Groups    []map[string]string `json:"groups"`
+		Groups    []map[string]string `json:"hostgroups"`
 		Templates []map[string]string `json:"parentTemplates"`
 	}
 	if err := json.Unmarshal(raw, &hosts); err != nil {
@@ -360,6 +366,9 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 		updateParams["description"] = in.Description
 	}
 	if len(in.AddGroupIDs) > 0 || len(in.RemoveGroupIDs) > 0 {
+		if len(groupSet) == 0 {
+			return nil, fmt.Errorf("cannot remove all host groups: a host must belong to at least one group")
+		}
 		groups := make([]map[string]string, 0, len(groupSet))
 		for id := range groupSet {
 			groups = append(groups, map[string]string{"groupid": id})
@@ -372,6 +381,13 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 			tmpls = append(tmpls, map[string]string{"templateid": id})
 		}
 		updateParams["templates"] = tmpls
+		if len(in.RemoveTemplateIDs) > 0 {
+			clear := make([]map[string]string, len(in.RemoveTemplateIDs))
+			for i, id := range in.RemoveTemplateIDs {
+				clear[i] = map[string]string{"templateid": id}
+			}
+			updateParams["templates_clear"] = clear
+		}
 	}
 
 	_, err = c.Call("host.update", updateParams)
@@ -387,15 +403,8 @@ func DeleteHost(c *api.Client, hostID string) (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := c.Call("host.delete", []string{hostID})
-	if err != nil {
+	if _, err = c.Call("host.delete", []string{hostID}); err != nil {
 		return nil, fmt.Errorf("host.delete: %w", err)
-	}
-	var result struct {
-		HostIDs []string `json:"hostids"`
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return nil, fmt.Errorf("parsing host.delete response: %w", err)
 	}
 	return h, nil
 }
