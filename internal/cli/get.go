@@ -341,6 +341,7 @@ func runGetHost(cmd *cobra.Command, args []string) error {
 var (
 	getItemsKey    string
 	getItemsStatus string
+	getItemsState  string
 	getItemsLimit  int
 )
 
@@ -355,6 +356,7 @@ func init() {
 	f := getItemsCmd.Flags()
 	f.StringVar(&getItemsKey, "key", "", "substring search on item key")
 	f.StringVar(&getItemsStatus, "status", "", "filter by status: enabled|disabled")
+	f.StringVar(&getItemsState, "state", "", "filter by collection state: normal|unsupported")
 	f.IntVar(&getItemsLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getItemsCmd)
 }
@@ -389,6 +391,16 @@ func runGetItems(cmd *cobra.Command, args []string) error {
 	default:
 		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use enabled or disabled", getItemsStatus), output.ExitError)
 	}
+	switch getItemsState {
+	case "normal":
+		filter.State = "0"
+	case "unsupported":
+		filter.State = "1"
+	case "":
+		// no filter
+	default:
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --state %q: use normal or unsupported", getItemsState), output.ExitError)
+	}
 
 	items, err := resources.GetItems(c, filter)
 	if err != nil {
@@ -400,25 +412,33 @@ func runGetItems(cmd *cobra.Command, args []string) error {
 		{Key: "name", Header: "NAME"},
 		{Key: "key_", Header: "KEY"},
 		{Key: "status", Header: "STATUS"},
+		{Key: "state", Header: "STATE"},
 		{Key: "units", Header: "UNITS"},
 		{Key: "delay", Header: "DELAY"},
 	}
 	rows := make([]map[string]any, len(items))
 	for i, it := range items {
+		stateLabel := "normal"
+		if it.State == "1" {
+			stateLabel = "unsupported"
+		}
 		rows[i] = map[string]any{
-			"itemid":     it.ItemID,
-			"hostid":     it.HostID,
-			"name":       it.Name,
-			"key_":       it.Key,
-			"type":       it.Type,
-			"value_type": it.ValueType,
-			"status":     enabledLabel(it.Status),
-			"status_raw": it.Status,
-			"lastvalue":  it.LastValue,
-			"lastclock":  fmtUnix(it.LastClock),
+			"itemid":         it.ItemID,
+			"hostid":         it.HostID,
+			"name":           it.Name,
+			"key_":           it.Key,
+			"type":           it.Type,
+			"value_type":     it.ValueType,
+			"status":         enabledLabel(it.Status),
+			"status_raw":     it.Status,
+			"state":          stateLabel,
+			"state_raw":      it.State,
+			"error":          it.Error,
+			"lastvalue":      it.LastValue,
+			"lastclock":      fmtUnix(it.LastClock),
 			"lastclock_unix": it.LastClock,
-			"units":      it.Units,
-			"delay":      it.Delay,
+			"units":          it.Units,
+			"delay":          it.Delay,
 		}
 	}
 	return output.Print(outFmt, cols, rows)
@@ -1310,4 +1330,235 @@ func parseSeverity(s string) (string, error) {
 		return "", fmt.Errorf("invalid severity %q: use 0-5 or not_classified|information|warning|average|high|disaster", s)
 	}
 	return s, nil
+}
+
+// ── get scripts ───────────────────────────────────────────────────────────────
+
+var getScriptsHost string
+
+var getScriptsCmd = &cobra.Command{
+	Use:   "scripts",
+	Short: "List Zabbix scripts",
+	RunE:  runGetScripts,
+}
+
+func init() {
+	getScriptsCmd.Flags().StringVar(&getScriptsHost, "host", "", "filter to scripts applicable to this host (name or ID)")
+	getCmd.AddCommand(getScriptsCmd)
+}
+
+func runGetScripts(_ *cobra.Command, _ []string) error {
+	c, outFmt, _, err := newClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	f := resources.ScriptFilter{}
+	if getScriptsHost != "" {
+		id, err := resources.ResolveHostID(c, getScriptsHost)
+		if err != nil {
+			var nfe *resources.NotFoundError
+			if errors.As(err, &nfe) {
+				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+			}
+			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		}
+		f.HostIDs = []string{id}
+	}
+
+	scripts, err := resources.GetScripts(c, f)
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	cols := []output.Column{
+		{Key: "scriptid", Header: "SCRIPT_ID"},
+		{Key: "name", Header: "NAME"},
+		{Key: "type", Header: "TYPE"},
+		{Key: "execute_on", Header: "EXECUTE_ON"},
+		{Key: "description", Header: "DESCRIPTION"},
+	}
+	rows := make([]map[string]any, len(scripts))
+	for i, s := range scripts {
+		rows[i] = map[string]any{
+			"scriptid":       s.ScriptID,
+			"name":           s.Name,
+			"type":           resources.ScriptTypeLabel(s.Type),
+			"type_raw":       s.Type,
+			"execute_on":     resources.ExecuteOnLabel(s.ExecuteOn),
+			"execute_on_raw": s.ExecuteOn,
+			"description":    s.Description,
+			"command":        s.Command,
+		}
+	}
+	return output.Print(outFmt, cols, rows)
+}
+
+// ── get alerts ────────────────────────────────────────────────────────────────
+
+var (
+	getAlertsHost   string
+	getAlertsEvent  string
+	getAlertsSince  string
+	getAlertsStatus string
+	getAlertsLimit  int
+)
+
+var getAlertsCmd = &cobra.Command{
+	Use:   "alerts",
+	Short: "List notification alerts (delivery status)",
+	RunE:  runGetAlerts,
+}
+
+func init() {
+	f := getAlertsCmd.Flags()
+	f.StringVar(&getAlertsHost, "host", "", "filter by host name or ID")
+	f.StringVar(&getAlertsEvent, "event", "", "filter by event ID")
+	f.StringVar(&getAlertsSince, "since", "", "alerts after this time: unix timestamp, RFC3339, or YYYY-MM-DD")
+	f.StringVar(&getAlertsStatus, "status", "", "filter by delivery status: sent|failed")
+	f.IntVar(&getAlertsLimit, "limit", 0, "max results")
+	getCmd.AddCommand(getAlertsCmd)
+}
+
+func runGetAlerts(_ *cobra.Command, _ []string) error {
+	c, outFmt, ctx, err := newClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	switch getAlertsStatus {
+	case "sent", "failed", "":
+		// valid
+	default:
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use sent or failed", getAlertsStatus), output.ExitError)
+	}
+
+	f := resources.AlertFilter{
+		Limit:  effectiveLimit(getAlertsLimit, ctx),
+		Status: getAlertsStatus,
+	}
+
+	if getAlertsHost != "" {
+		id, err := resources.ResolveHostID(c, getAlertsHost)
+		if err != nil {
+			var nfe *resources.NotFoundError
+			if errors.As(err, &nfe) {
+				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+			}
+			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		}
+		f.HostIDs = []string{id}
+	}
+	if getAlertsEvent != "" {
+		f.EventIDs = []string{getAlertsEvent}
+	}
+	if getAlertsSince != "" {
+		ts, err := parseTimestamp(getAlertsSince)
+		if err != nil {
+			return cliPrintErr(outFmt, "invalid --since: "+err.Error(), output.ExitError)
+		}
+		f.Since = ts
+	}
+
+	alerts, err := resources.GetAlerts(c, f)
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	cols := []output.Column{
+		{Key: "alertid", Header: "ALERT_ID"},
+		{Key: "eventid", Header: "EVENT_ID"},
+		{Key: "host", Header: "HOST"},
+		{Key: "sendto", Header: "SEND_TO"},
+		{Key: "status", Header: "STATUS"},
+		{Key: "clock", Header: "TIME"},
+	}
+	rows := make([]map[string]any, len(alerts))
+	for i, a := range alerts {
+		rows[i] = map[string]any{
+			"alertid":     a.AlertID,
+			"eventid":     a.EventID,
+			"hostid":      a.HostID,
+			"host":        a.Host,
+			"clock":       fmtUnix(a.Clock),
+			"clock_unix":  a.Clock,
+			"sendto":      a.SendTo,
+			"subject":     a.Subject,
+			"status":      resources.AlertStatusLabel(a.Status),
+			"status_raw":  a.Status,
+			"error":       a.Error,
+			"userid":      a.UserID,
+			"mediatypeid": a.MediaTypeID,
+		}
+	}
+	return output.Print(outFmt, cols, rows)
+}
+
+// ── get interfaces ────────────────────────────────────────────────────────────
+
+var getInterfacesCmd = &cobra.Command{
+	Use:   "interfaces <host>",
+	Short: "Show network interfaces for a host",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runGetInterfaces,
+}
+
+func init() { getCmd.AddCommand(getInterfacesCmd) }
+
+func runGetInterfaces(_ *cobra.Command, args []string) error {
+	c, outFmt, _, err := newClient()
+	if err != nil {
+		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	hostID, err := resources.ResolveHostID(c, args[0])
+	if err != nil {
+		var nfe *resources.NotFoundError
+		if errors.As(err, &nfe) {
+			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+		}
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	ifaces, err := resources.GetInterfaces(c, hostID)
+	if err != nil {
+		var nfe *resources.NotFoundError
+		if errors.As(err, &nfe) {
+			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+		}
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	cols := []output.Column{
+		{Key: "interfaceid", Header: "IFACE_ID"},
+		{Key: "host", Header: "HOST"},
+		{Key: "type", Header: "TYPE"},
+		{Key: "ip", Header: "IP"},
+		{Key: "dns", Header: "DNS"},
+		{Key: "port", Header: "PORT"},
+		{Key: "available", Header: "AVAILABLE"},
+		{Key: "error", Header: "ERROR"},
+	}
+	rows := make([]map[string]any, len(ifaces))
+	for i, iface := range ifaces {
+		rows[i] = map[string]any{
+			"interfaceid":       iface.InterfaceID,
+			"hostid":            iface.HostID,
+			"host":              iface.Host,
+			"type":              iface.Type,
+			"type_raw":          iface.TypeRaw,
+			"main":              iface.Main,
+			"useip":             iface.UseIP,
+			"ip":                iface.IP,
+			"dns":               iface.DNS,
+			"port":              iface.Port,
+			"available":         iface.Available,
+			"available_raw":     iface.AvailableRaw,
+			"error":             iface.Error,
+			"snmp_version":      iface.SNMPVersion,
+			"snmp_community":    iface.SNMPCommunity,
+			"snmp_securityname": iface.SNMPSecurityName,
+		}
+	}
+	return output.Print(outFmt, cols, rows)
 }
