@@ -1166,12 +1166,14 @@ func runGetUserGroups(cmd *cobra.Command, args []string) error {
 // ── get history ───────────────────────────────────────────────────────────────
 
 var (
-	flagHistoryItem   string
-	flagHistoryHosts  []string
-	flagHistoryGroups []string
-	flagHistorySince  string
-	flagHistoryUntil  string
-	flagHistoryLimit  int
+	flagHistoryItem        string
+	flagHistoryHosts       []string
+	flagHistoryGroups      []string
+	flagHistorySince       string
+	flagHistoryUntil       string
+	flagHistoryLimit       int
+	flagHistoryAroundEvent string
+	flagHistoryWindow      string
 )
 
 var historyCmd = &cobra.Command{
@@ -1188,7 +1190,8 @@ func init() {
 	f.StringVar(&flagHistorySince, "since", "", "start time: unix timestamp, RFC3339, or YYYY-MM-DD")
 	f.StringVar(&flagHistoryUntil, "until", "", "end time: unix timestamp, RFC3339, or YYYY-MM-DD")
 	f.IntVar(&flagHistoryLimit, "limit", 0, "max results")
-	_ = historyCmd.MarkFlagRequired("item")
+	f.StringVar(&flagHistoryAroundEvent, "around-event", "", "anchor query to this event ID (resolves host, centers window on event clock)")
+	f.StringVar(&flagHistoryWindow, "window", "1h", "time window for --around-event: 30m|1h|2h|6h")
 	getCmd.AddCommand(historyCmd)
 }
 
@@ -1209,6 +1212,14 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
 		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+	}
+
+	if flagHistoryAroundEvent != "" {
+		return runGetHistoryAroundEvent(c, outFmt, ctx)
+	}
+
+	if flagHistoryItem == "" {
+		return cliPrintErr(outFmt, "--item is required (or use --around-event)", output.ExitError)
 	}
 
 	// Non-numeric item key requires at least one host or group for resolution.
@@ -1303,6 +1314,76 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 			"value":      r.Value,
 		}
 	}
+	return output.Print(outFmt, cols, rows)
+}
+
+func runGetHistoryAroundEvent(c *api.Client, outFmt output.Format, ctx *config.Context) error {
+	windowDur, err := time.ParseDuration(flagHistoryWindow)
+	if err != nil {
+		return cliPrintErr(outFmt,
+			fmt.Sprintf("invalid --window %q: use 30m, 1h, 2h, or 6h", flagHistoryWindow),
+			output.ExitError)
+	}
+	half := windowDur / 2
+
+	info, err := resources.GetEventTriggerInfo(c, flagHistoryAroundEvent)
+	if err != nil {
+		var nfe *resources.NotFoundError
+		if errors.As(err, &nfe) {
+			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
+		}
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+	if info.HostID == "" {
+		return cliPrintErr(outFmt,
+			fmt.Sprintf("could not resolve host for event %s", flagHistoryAroundEvent),
+			output.ExitError)
+	}
+
+	timeFrom := info.Clock - int64(half.Seconds())
+	timeTill := info.Clock + int64(half.Seconds())
+
+	records, err := resources.GetHistory(c, resources.HistoryQuery{
+		HostIDs:   []string{info.HostID},
+		KeySearch: flagHistoryItem,
+		TimeFrom:  timeFrom,
+		TimeTill:  timeTill,
+		Limit:     effectiveLimit(flagHistoryLimit, ctx),
+	})
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+	}
+
+	cols := []output.Column{
+		{Key: "host", Header: "HOST"},
+		{Key: "key_", Header: "KEY"},
+		{Key: "clock", Header: "TIME"},
+		{Key: "value", Header: "VALUE"},
+	}
+	rows := make([]map[string]any, len(records))
+	for i, r := range records {
+		rows[i] = map[string]any{
+			"host":       r.Host,
+			"hostid":     r.HostID,
+			"itemid":     r.ItemID,
+			"key_":       r.Key,
+			"clock":      fmtUnix(r.Clock),
+			"clock_unix": r.ClockUnix,
+			"value":      r.Value,
+		}
+	}
+
+	if outFmt == output.FormatJSON || outFmt == output.FormatJSONL {
+		meta := map[string]any{
+			"event_id":    info.EventID,
+			"event_clock": fmtUnix(fmt.Sprintf("%d", info.Clock)),
+			"event_name":  info.EventName,
+			"window_from": fmtUnix(fmt.Sprintf("%d", timeFrom)),
+			"window_till": fmtUnix(fmt.Sprintf("%d", timeTill)),
+		}
+		rows = append(rows, map[string]any{"_meta": meta})
+	}
+
 	return output.Print(outFmt, cols, rows)
 }
 
