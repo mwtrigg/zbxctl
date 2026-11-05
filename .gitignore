@@ -11,3 +11,6 @@ dist/
 # environment overrides
 .env
 
+
+# agent worktrees
+.claude/worktrees/
