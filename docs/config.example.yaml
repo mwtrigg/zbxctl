@@ -1,0 +1,20 @@
+current_context: prod
+
+contexts:
+  prod:
+    url: https://zabbix.example.com
+    api_token: ""
+    username: Admin
+    password: ""
+    tls_verify: true
+    ca_file: ""
+    proxy: ""
+    default_limit: 100
+
+  staging:
+    url: https://zabbix-staging.example.com
+    api_token: ""
+    username: Admin
+    password: ""
+    tls_verify: true
+    default_limit: 100
