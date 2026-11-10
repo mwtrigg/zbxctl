@@ -80,3 +80,15 @@ func TestCobraAndFieldErrorsAreUsage(t *testing.T) {
 		t.Error("FieldError not usage")
 	}
 }
+
+func TestUserDeleteBlocks(t *testing.T) {
+	if userDeleteBlock("admin", "1", "9") == nil {
+		t.Error("Admin must be refused (case-insensitive)")
+	}
+	if userDeleteBlock("svc", "4", "4") == nil {
+		t.Error("token owner must be refused")
+	}
+	if err := userDeleteBlock("bob", "7", "4"); err != nil {
+		t.Errorf("ordinary user refused: %v", err)
+	}
+}

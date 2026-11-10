@@ -139,6 +139,24 @@ func (c *Client) CallList(method string, params map[string]any) (json.RawMessage
 	return c.Call(method, params)
 }
 
+// CurrentUser returns the user the credentials belong to. Zabbix requires
+// user.checkAuthentication to be called without an Authorization header.
+func (c *Client) CurrentUser() (userID, username string, err error) {
+	tmp := &Client{httpClient: c.httpClient, endpoint: c.endpoint}
+	raw, err := tmp.callRaw(context.Background(), "user.checkAuthentication", map[string]any{"token": c.bearerToken})
+	if err != nil {
+		return "", "", err
+	}
+	var u struct {
+		UserID   string `json:"userid"`
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return "", "", fmt.Errorf("parsing current user: %w", err)
+	}
+	return u.UserID, u.Username, nil
+}
+
 // APIVersion calls apiinfo.version (no authentication required).
 func (c *Client) APIVersion() (string, error) {
 	// Use a client without auth header for this call.

@@ -19,8 +19,8 @@ func newFake(t *testing.T, results map[string]string) (*api.Client, *[]map[strin
 	var calls []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Method string         `json:"method"`
-			Params map[string]any `json:"params"`
+			Method string `json:"method"`
+			Params any    `json:"params"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		calls = append(calls, map[string]any{"method": req.Method, "params": req.Params, "auth": r.Header.Get("Authorization")})
@@ -169,5 +169,30 @@ func TestHostTagMerging(t *testing.T) {
 	}
 	if tags, ok := (*calls)[0]["params"].(map[string]any)["tags"].([]any); !ok || len(tags) != 0 {
 		t.Errorf("empty tag list must encode as []: %v", (*calls)[0]["params"])
+	}
+}
+
+func TestCreateUserAndGroupParams(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"user.create": `{"userids":["5"]}`, "usergroup.create": `{"usrgrpids":["14"]}`, "user.delete": `{"userids":["5"]}`})
+	id, err := CreateUser(c, CreateUserInput{Username: "bob", Password: "pw", RoleID: "1", GroupIDs: []string{"14"}})
+	if err != nil || id != "5" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	if g := p["usrgrps"].([]any)[0].(map[string]any); g["usrgrpid"] != "14" || p["roleid"] != "1" || p["passwd"] != "pw" {
+		t.Fatalf("bad user.create params: %v", p)
+	}
+	if gid, err := CreateUserGroup(c, "g", "1", true); err != nil || gid != "14" {
+		t.Fatalf("group: %q %v", gid, err)
+	}
+	gp := (*calls)[1]["params"].(map[string]any)
+	if gp["gui_access"] != "1" || gp["users_status"].(float64) != 1 {
+		t.Fatalf("bad usergroup.create params: %v", gp)
+	}
+	if err := DeleteUser(c, "5"); err != nil {
+		t.Fatal(err)
+	}
+	if ids, ok := (*calls)[2]["params"].([]any); !ok || ids[0] != "5" {
+		t.Fatalf("user.delete params should be an ID array: %v", (*calls)[2]["params"])
 	}
 }
