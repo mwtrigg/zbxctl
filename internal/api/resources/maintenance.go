@@ -9,11 +9,11 @@ import (
 
 // Maintenance represents a Zabbix maintenance window.
 type Maintenance struct {
-	MaintenanceID string `json:"maintenanceid"`
-	Name          string `json:"name"`
-	ActiveSince   string `json:"active_since"`  // Unix timestamp
-	ActiveTill    string `json:"active_till"`   // Unix timestamp
-	Description   string `json:"description"`
+	MaintenanceID   string `json:"maintenanceid"`
+	Name            string `json:"name"`
+	ActiveSince     string `json:"active_since"` // Unix timestamp
+	ActiveTill      string `json:"active_till"`  // Unix timestamp
+	Description     string `json:"description"`
 	MaintenanceType string `json:"maintenance_type"` // "0"=with data collection, "1"=without
 }
 
@@ -65,11 +65,11 @@ func GetMaintenanceByName(c *api.Client, name string) (*Maintenance, error) {
 
 // CreateMaintenanceParams holds parameters for creating a maintenance window.
 type CreateMaintenanceParams struct {
-	Name      string
-	HostIDs   []string
-	GroupIDs  []string
-	ActiveSince int64  // Unix timestamp — start
-	ActiveTill  int64  // Unix timestamp — end (ActiveSince + duration)
+	Name        string
+	HostIDs     []string
+	GroupIDs    []string
+	ActiveSince int64 // Unix timestamp — start
+	ActiveTill  int64 // Unix timestamp — end (ActiveSince + duration)
 	Description string
 }
 
@@ -134,8 +134,8 @@ func DeleteMaintenance(c *api.Client, maintenanceID string) error {
 func ResolveMaintenance(c *api.Client, idOrName string) (*Maintenance, error) {
 	if isNumeric(idOrName) {
 		params := map[string]any{
-			"output":          []string{"maintenanceid", "name", "active_since", "active_till", "description", "maintenance_type"},
-			"maintenanceids":  []string{idOrName},
+			"output":         []string{"maintenanceid", "name", "active_since", "active_till", "description", "maintenance_type"},
+			"maintenanceids": []string{idOrName},
 		}
 		raw, err := c.Call("maintenance.get", params)
 		if err != nil {

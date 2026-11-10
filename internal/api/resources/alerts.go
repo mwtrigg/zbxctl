@@ -16,7 +16,7 @@ type Alert struct {
 	Clock       string `json:"clock"`
 	SendTo      string `json:"sendto"`
 	Subject     string `json:"subject"`
-	Status      string `json:"status"`      // "0"=not_sent, "1"=sent, "2"=failed, "3"=new
+	Status      string `json:"status"` // "0"=not_sent, "1"=sent, "2"=failed, "3"=new
 	Error       string `json:"error"`
 	UserID      string `json:"userid"`
 	MediaTypeID string `json:"mediatypeid"`

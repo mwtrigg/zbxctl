@@ -10,7 +10,7 @@ import (
 // Problem represents an active or recently-resolved Zabbix problem.
 type Problem struct {
 	EventID         string `json:"eventid"`
-	ObjectID        string `json:"objectid"`     // triggerid
+	ObjectID        string `json:"objectid"` // triggerid
 	Name            string `json:"name"`
 	Severity        string `json:"severity"`     // 0–5
 	Acknowledged    string `json:"acknowledged"` // "0"|"1"

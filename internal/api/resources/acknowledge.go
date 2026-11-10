@@ -16,14 +16,15 @@ type AcknowledgeParams struct {
 // AcknowledgeEvent acknowledges a Zabbix event.
 //
 // Zabbix event.acknowledge action bitmask:
-//   1  — close problem
-//   2  — acknowledge
-//   4  — add message
-//   8  — change severity
-//   16 — unacknowledge
-//   32 — suppress
-//   64 — unsuppress
-//   128 — change cause
+//
+//	1  — close problem
+//	2  — acknowledge
+//	4  — add message
+//	8  — change severity
+//	16 — unacknowledge
+//	32 — suppress
+//	64 — unsuppress
+//	128 — change cause
 func AcknowledgeEvent(c *api.Client, p AcknowledgeParams) error {
 	// Build action bitmask: always acknowledge (2).
 	action := 2
