@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
 	"github.com/mwtrigg/zbxctl/internal/api/resources"
@@ -51,7 +52,10 @@ var rootCmd = &cobra.Command{
 Single static binary. Machine-readable output. Structured errors.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := enforceMCPPolicy(cmd, args); err != nil {
+			return err
+		}
 		output.Raw = flagRaw
 		api.Timeout, api.Retries = flagTimeout, flagRetries
 		if err := setDisplayZone(flagTZ); err != nil {
@@ -62,7 +66,33 @@ Single static binary. Machine-readable output. Structured errors.`,
 			flagApply = true // --yes is an alias for --apply
 		}
 		output.Command = strings.TrimPrefix(cmd.CommandPath(), "zbxctl ")
+		return nil
 	},
+}
+
+// enforceMCPPolicy makes a process started by the MCP server refuse the flags and
+// values the server never offers, whatever way they arrived.
+func enforceMCPPolicy(cmd *cobra.Command, args []string) error {
+	if os.Getenv("ZBXCTL_FROM_MCP") == "" {
+		return nil
+	}
+	var bad []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if mcpChildDenied(f.Name) {
+			bad = append(bad, "--"+f.Name)
+		}
+	})
+	if len(bad) > 0 {
+		return &usageError{msg: "not allowed over MCP: " + strings.Join(bad, ", ")}
+	}
+	if cmd.CommandPath() == "zbxctl state show" {
+		for _, a := range args {
+			if strings.ContainsAny(a, `/\`) {
+				return &usageError{msg: "state show takes a file name, not a path, over MCP"}
+			}
+		}
+	}
+	return nil
 }
 
 // usageError marks a bad flag or argument (exit code 5).
