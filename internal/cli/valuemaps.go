@@ -96,6 +96,7 @@ func deleteValueMapSpec() bulkSpec {
 				Key: vm.ID, Desc: fmt.Sprintf("delete value map %q (%s) with %d mapping(s)", vm.Name, vm.Owner, len(vm.Mappings)),
 				Before: map[string]any{"valuemapid": vm.ID, "owner": vm.Owner, "owner_id": vm.HostID, "name": vm.Name, "mappings": vm.MappingLabels(), "mappings_raw": vm.Mappings},
 				Apply:  func() error { return resources.DeleteValueMap(c, vm.ID) },
+				Proves: true,
 				Verify: func() error {
 					left, err := resources.GetValueMaps(c, resources.ValueMapFilter{IDs: []string{vm.ID}})
 					if err != nil {
@@ -327,6 +328,7 @@ func deleteRegexpSpec() bulkSpec {
 				Key: r.ID, Desc: fmt.Sprintf("delete regular expression %q (%d expression(s))", r.Name, len(r.Expressions)),
 				Before: map[string]any{"regexpid": r.ID, "name": r.Name, "test_string": r.TestString, "expressions": r.ExpressionLabels(), "expressions_raw": r.Expressions},
 				Apply:  func() error { return resources.DeleteRegexp(c, r.ID) },
+				Proves: true,
 				Verify: func() error {
 					_, err := resources.FindRegexp(c, r.ID)
 					var nfe *resources.NotFoundError

@@ -157,10 +157,19 @@ func GetHosts(c *api.Client, f HostFilter) ([]Host, error) {
 	return hosts, nil
 }
 
+var hostOutputFields = []string{"hostid", "host", "name", "status", "description", "monitored_by", "proxyid", "proxy_groupid"}
+
+// GetHostByID returns the host with exactly this ID. zbxctl's own lookups of a
+// host it already resolved use it, so a host that happens to be named like that
+// ID can never be mistaken for it (GetHost would report the ambiguity).
+func GetHostByID(c *api.Client, id string) (*Host, error) {
+	return hostGetOne(c, hostOutputFields, map[string]any{"hostids": []string{id}}, id)
+}
+
 // GetHost returns a single host by numeric ID, technical name, or visible name.
 // Lookup order: numeric ID → technical name (host field) → visible name (name field).
 func GetHost(c *api.Client, idOrName string) (*Host, error) {
-	outputFields := []string{"hostid", "host", "name", "status", "description", "monitored_by", "proxyid", "proxy_groupid"}
+	outputFields := hostOutputFields
 
 	byID := func(id string) (*Host, error) {
 		return hostGetOne(c, outputFields, map[string]any{"hostids": []string{id}}, id)
@@ -386,7 +395,7 @@ func CreateHost(c *api.Client, in CreateHostInput) (*Host, error) {
 	if len(result.HostIDs) == 0 {
 		return nil, fmt.Errorf("host.create returned no hostids")
 	}
-	return GetHost(c, result.HostIDs[0])
+	return GetHostByID(c, result.HostIDs[0])
 }
 
 // UpdateHostInput holds fields for host.update. Only non-empty/non-nil fields
@@ -511,12 +520,12 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 	if err != nil {
 		return nil, fmt.Errorf("host.update: %w", err)
 	}
-	return GetHost(c, in.HostID)
+	return GetHostByID(c, in.HostID)
 }
 
 // DeleteHost fetches the host record (for output), then deletes it.
 func DeleteHost(c *api.Client, hostID string) (*Host, error) {
-	h, err := GetHost(c, hostID)
+	h, err := GetHostByID(c, hostID)
 	if err != nil {
 		return nil, err
 	}

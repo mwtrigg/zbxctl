@@ -214,6 +214,7 @@ func runDeleteLost(cmd *cobra.Command, kind string, args []string) error {
 					}
 					return resources.DeleteLost(c, kind, id)
 				},
+				Proves: true,
 				Verify: func() error {
 					left, err := resources.GetLost(c, kind, nil, nil)
 					if err != nil {

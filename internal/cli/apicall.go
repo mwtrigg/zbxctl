@@ -137,6 +137,7 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 			return cliFail(outFmt, err)
 		}
 		applyStateSettings(cmd, ctx)
+		var write *writeRecord // the audit record of a write method
 		read := isReadMethod(lower)
 		if !read {
 			if err := ctx.CheckPermission("write"); err != nil {
@@ -150,11 +151,15 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 					[]map[string]any{{"method": method, "would": "call " + method, "params": maskSecrets(params), "applied": false, "dry_run": true}})
 			}
 			if !bulkNoState {
-				if path, err := writeState("api-call-"+strings.ReplaceAll(method, ".", "-"), []*step{{Key: method, Desc: "call " + method, Before: map[string]any{"params": maskSecrets(params)}}}); err == nil {
-					fmt.Fprintf(os.Stderr, "audit record saved: %s\n", path)
-				} else {
+				r, err := newStateRecorder("api-call-"+strings.ReplaceAll(method, ".", "-"), []*step{{Key: method, Desc: "call " + method, Before: map[string]any{"params": maskSecrets(params)}}})
+				if err != nil {
 					return cliFail(outFmt, fmt.Errorf("cannot save the audit record (use --no-state to skip): %w", err))
 				}
+				fmt.Fprintf(os.Stderr, "audit record saved: %s\n", r.path)
+				write = &writeRecord{rec: r}
+				write.note(stateSent, nil)
+			} else {
+				write = &writeRecord{}
 			}
 		}
 		var result any
@@ -167,7 +172,13 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 		} else {
 			raw, err := c.Call(method, params)
 			if err != nil {
+				if write != nil {
+					err = write.failed(err)
+				}
 				return cliFail(outFmt, err)
+			}
+			if write != nil {
+				write.ok()
 			}
 			_ = json.Unmarshal(raw, &result)
 			if !flagShowSecrets {

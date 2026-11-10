@@ -353,6 +353,7 @@ func runImport(noun string, args []string, dir string, isImport bool) error {
 	}
 
 	// Save what is about to be overwritten.
+	var rec *stateRecorder
 	if !bulkNoState {
 		var steps []*step
 		for _, j := range jobs {
@@ -362,13 +363,13 @@ func runImport(noun string, args []string, dir string, isImport bool) error {
 			for _, name := range updated {
 				var id string
 				if noun == "host" {
-					h, err := resources.GetHost(c, name)
+					h, err := resources.GetHost(c, "name:"+name)
 					if err != nil {
 						return cliFail(outFmt, fmt.Errorf("cannot save the current state of %s %q before importing (use --no-state to skip): %w", noun, name, err))
 					}
 					id = h.HostID
 				} else {
-					t, err := resources.GetTemplate(c, name)
+					t, err := resources.GetTemplate(c, "name:"+name)
 					if err != nil {
 						return cliFail(outFmt, fmt.Errorf("cannot save the current state of %s %q before importing (use --no-state to skip): %w", noun, name, err))
 					}
@@ -383,20 +384,43 @@ func runImport(noun string, args []string, dir string, isImport bool) error {
 			before["previous_export_yaml"] = exports
 			steps = append(steps, &step{Key: j.path, Desc: "import " + j.path, Before: before})
 		}
-		path, err := writeState("import-"+noun, steps)
+		r, err := newStateRecorder("import-"+noun, steps)
 		if err != nil {
 			return cliFail(outFmt, fmt.Errorf("cannot save the before-state (use --no-state to skip): %w", err))
 		}
-		fmt.Fprintf(os.Stderr, "before-state saved: %s\n", path)
+		rec = r
+		fmt.Fprintf(os.Stderr, "before-state saved: %s\n", r.path)
+		defer func() {
+			if _, err := os.Stat(r.path); err == nil {
+				pruneOldStates(filepath.Dir(r.path), r.path)
+			}
+		}()
+	}
+	mark := func(i int, status string, err error) {
+		if rec != nil {
+			if serr := rec.mark(i, status, err); serr != nil {
+				fmt.Fprintf(os.Stderr, "warning: cannot update the before-state file %s: %v\n", rec.path, serr)
+			}
+		}
 	}
 
 	var out []map[string]any
 	for i, j := range jobs {
 		// Import regardless of what the comparison listed: importcompare does not
 		// always report objects that would be newly created.
+		mark(i, stateSent, nil)
 		if err := resources.ImportConfig(c, typ, j.format, j.source); err != nil {
-			return cliFail(outFmt, fmt.Errorf("%s: %w (%d of %d files imported)", j.path, err, i, len(jobs)))
+			if definitive(err) {
+				mark(i, stateFailed, err)
+				if i == 0 && rec != nil {
+					_ = os.Remove(rec.path) // Zabbix refused the first file: nothing changed
+				}
+				return cliFail(outFmt, fmt.Errorf("%s: %w (%d of %d files imported)", j.path, err, i, len(jobs)))
+			}
+			mark(i, stateUnknown, err)
+			return cliFail(outFmt, &outcomeUnknownError{fmt.Sprintf("%s: %v. The import may or may not have been applied (%d of %d files confirmed); check before retrying. The before-state file is kept: %s", j.path, err, i, len(jobs), statePathOrNone(rec))})
 		}
+		mark(i, stateApplied, nil)
 		if len(j.changes) == 0 {
 			out = append(out, map[string]any{"file": j.path, "action": "imported", "path": j.path, "fields": []string{}, "applied": true})
 		}

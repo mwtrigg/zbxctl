@@ -37,6 +37,7 @@ func deleteGroupSpec() bulkSpec {
 				Key: g.GroupID, Desc: desc,
 				Before: map[string]any{"groupid": g.GroupID, "name": g.Name, "host_count": g.HostCount},
 				Apply:  func() error { return resources.DeleteGroup(c, g.GroupID) },
+				Proves: true,
 				Verify: func() error {
 					_, err := resources.GetGroupInfo(c, g.GroupID)
 					var nfe *resources.NotFoundError

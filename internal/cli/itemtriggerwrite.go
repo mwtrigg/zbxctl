@@ -383,6 +383,7 @@ func deleteItemSpec() bulkSpec {
 				Key: it.ID, Desc: fmt.Sprintf("delete item %q (%s) on %s", it.Name, it.Key, it.Host),
 				Before: map[string]any{"itemid": it.ID, "host": it.Host, "name": it.Name, "key": it.Key, "type": it.Type, "value_type": it.ValueType, "delay": it.Delay, "units": it.Units, "history": it.History, "trends": it.Trends, "description": it.Description, "params": it.Params},
 				Apply:  func() error { return resources.DeleteItem(c, it.ID) },
+				Proves: true,
 				Verify: func() error {
 					_, err := resources.GetItemFull(c, it.ID, "")
 					var nfe *resources.NotFoundError
@@ -419,6 +420,7 @@ func deleteTriggerSpec() bulkSpec {
 				Key: t.ID, Desc: fmt.Sprintf("delete trigger %s %q (%s)", t.ID, t.Description, strings.Join(t.Hosts, ",")),
 				Before: map[string]any{"triggerid": t.ID, "description": t.Description, "expression": t.Expression, "severity": severityLabel(t.Priority), "status": enabledLabel(t.Status), "comments": t.Comments, "manual_close": t.ManualClose == "1", "hosts": t.Hosts},
 				Apply:  func() error { return resources.DeleteTrigger(c, t.ID) },
+				Proves: true,
 				Verify: func() error {
 					_, err := resources.GetTriggerFull(c, t.ID)
 					var nfe *resources.NotFoundError

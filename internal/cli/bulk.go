@@ -65,11 +65,17 @@ func applyStateSettings(cmd *cobra.Command, ctx *config.Context) {
 
 // step is one target of a write: resolved, described, ready to apply.
 type step struct {
-	Key         string         // canonical ID, used to drop duplicate targets
-	Desc        string         // what will happen, e.g. `disable host "web-01"`
-	Before      map[string]any // state captured before the change (saved to the state file)
-	Apply       func() error
-	Verify      func() error // optional: re-read and check; nil result means confirmed
+	Key    string         // canonical ID, used to drop duplicate targets
+	Desc   string         // what will happen, e.g. `disable host "web-01"`
+	Before map[string]any // state captured before the change (saved to the state file)
+	Apply  func() error
+	Verify func() error // optional: re-read and check; nil result means confirmed
+	// Proves is true when a passing Verify is proof the change happened, which is the
+	// only case in which a re-read may turn an unclear failure (a timeout, a 504) into
+	// success. A re-read of a field that already had the wanted value proves nothing
+	// (the write may never have arrived), so such steps leave Proves false and the
+	// outcome stays unknown.
+	Proves      bool
 	VerifyAfter time.Duration
 	Row         map[string]any // result row after a successful apply
 }
@@ -375,7 +381,7 @@ func runSteps(outFmt output.Format, name string, specCols []output.Column, steps
 	for i, s := range steps {
 		note(i, stateSent, nil) // so a run killed mid-request does not look "not yet attempted"
 		err := s.Apply()
-		if err != nil && !definitive(err) && s.Verify != nil {
+		if err != nil && !definitive(err) && s.Proves && s.Verify != nil {
 			// The request may have been executed. Look before deciding.
 			time.Sleep(s.VerifyAfter)
 			if s.Verify() == nil {

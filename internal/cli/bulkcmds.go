@@ -74,8 +74,9 @@ func hostStatusSpec(enable bool) bulkSpec {
 					}
 					return resources.DisableHost(c, h.HostID)
 				},
+				Proves: hostStatusLabel(h.Status) != want, // already in the wanted state: a re-read proves nothing
 				Verify: func() error {
-					now, err := resources.GetHost(c, h.HostID)
+					now, err := resources.GetHostByID(c, h.HostID)
 					if err != nil {
 						return err
 					}
@@ -117,6 +118,7 @@ func triggerStatusSpec(enable bool) bulkSpec {
 					}
 					return resources.DisableTrigger(c, t.TriggerID)
 				},
+				Proves: t.Status != want,
 				Verify: func() error {
 					now, err := resources.GetTriggerByID(c, t.TriggerID)
 					if err != nil {
@@ -143,9 +145,10 @@ func deleteHostSpec() bulkSpec {
 			}
 			return &step{
 				Key: h.HostID, Desc: fmt.Sprintf("delete host %q (id: %s)", h.Host, h.HostID), Before: hostBefore(h),
-				Apply: func() error { _, err := resources.DeleteHost(c, h.HostID); return err },
+				Apply:  func() error { _, err := resources.DeleteHost(c, h.HostID); return err },
+				Proves: true,
 				Verify: func() error {
-					_, err := resources.GetHost(c, h.HostID)
+					_, err := resources.GetHostByID(c, h.HostID)
 					var nfe *resources.NotFoundError
 					if errors.As(err, &nfe) {
 						return nil
@@ -174,6 +177,7 @@ func maintenanceDeleteSpec() bulkSpec {
 				Key: m.MaintenanceID, Desc: fmt.Sprintf("delete maintenance %q (%s)", m.Name, m.MaintenanceID),
 				Before: map[string]any{"maintenanceid": m.MaintenanceID, "name": m.Name, "active_since": fmtUnix(m.ActiveSince), "active_till": fmtUnix(m.ActiveTill), "description": m.Description},
 				Apply:  func() error { return resources.DeleteMaintenance(c, m.MaintenanceID) },
+				Proves: true,
 				Verify: func() error {
 					_, err := resources.ResolveMaintenance(c, m.MaintenanceID)
 					var nfe *resources.NotFoundError
@@ -224,6 +228,7 @@ func maintenanceEndSpec(verb string, by time.Duration, until int64) bulkSpec {
 				Desc:   fmt.Sprintf("%s maintenance %q from %s to %s", verb, m.Name, fmtUnix(m.ActiveTill), newLabel),
 				Before: map[string]any{"maintenanceid": m.MaintenanceID, "name": m.Name, "active_since": fmtUnix(m.ActiveSince), "active_till": fmtUnix(m.ActiveTill), "hosts": m.HostNames(), "groups": m.GroupNames()},
 				Apply:  func() error { return resources.SetMaintenanceEnd(c, m, newTill) },
+				Proves: true,
 				Verify: func() error {
 					now, err := resources.ResolveMaintenance(c, m.MaintenanceID)
 					if err != nil {
@@ -380,6 +385,7 @@ func deleteTemplateSpec() bulkSpec {
 				Key: t.TemplateID, Desc: desc,
 				Before: map[string]any{"templateid": t.TemplateID, "host": t.Host, "name": t.Name, "linked_hosts": links.Hosts, "linked_templates": links.Templates, "export_yaml": export},
 				Apply:  func() error { return resources.DeleteTemplate(c, t.TemplateID) },
+				Proves: true,
 				Verify: func() error {
 					_, err := resources.GetTemplate(c, t.TemplateID)
 					var nfe *resources.NotFoundError

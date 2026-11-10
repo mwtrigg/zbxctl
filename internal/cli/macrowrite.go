@@ -219,6 +219,7 @@ func deleteMacroSpec() bulkSpec {
 				Key: m.ID, Desc: fmt.Sprintf("delete macro %s from %s", m.Macro, scope),
 				Before: map[string]any{"scope": scope, "macro": m.Macro, "value": val, "type": m.TypeLabel(), "description": m.Description},
 				Apply:  func() error { return resources.DeleteMacro(c, m.ID, dmGlobal) },
+				Proves: true,
 				Verify: func() error {
 					left, err := resources.FindMacro(c, hostID, dmGlobal, name)
 					if err != nil {

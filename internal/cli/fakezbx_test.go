@@ -133,3 +133,7 @@ func xdgStateFiles(t *testing.T) []string {
 	}
 	return out
 }
+
+func writeTestFile(path, body string) error { return os.WriteFile(path, []byte(body), 0o600) }
+
+func readFileString(path string) string { b, _ := os.ReadFile(path); return string(b) }

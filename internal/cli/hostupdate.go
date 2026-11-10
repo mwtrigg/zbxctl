@@ -97,6 +97,9 @@ func runUpdateHost(cmd *cobra.Command, args []string) error {
 	if flagUpdateHostProxy != "" && flagUpdateHostProxyGroup != "" {
 		return cliFail(output.Format(flagOutput), &usageError{"--proxy and --proxy-group are exclusive"})
 	}
+	if flagUpdateHostVisibleName != "" && (len(args) != 1 || bulkIDFile != "") {
+		return cliFail(output.Format(flagOutput), &usageError{"--visible-name names one host: give exactly one target (Zabbix refuses a duplicate visible name, after the first host has changed)"})
+	}
 	var changes *hostChanges
 	return runBulk(cmd, args, bulkSpec{
 		Name: "update-host", Tier: "write", Cols: hostCols,
@@ -115,13 +118,59 @@ func runUpdateHost(cmd *cobra.Command, args []string) error {
 			in.HostID = h.HostID
 			before := hostBefore(h)
 			// hostBefore keeps names; the IDs are what a restore needs.
-			if g, t, err := resources.HostLinkIDs(c, h.HostID); err == nil {
-				before["group_ids"], before["template_ids"] = g, t
+			beforeGroups, beforeTemplates, linkErr := resources.HostLinkIDs(c, h.HostID)
+			if linkErr == nil {
+				before["group_ids"], before["template_ids"] = beforeGroups, beforeTemplates
+			}
+			// Is any requested value different from what the host has now? Only then can a
+			// later re-read show that the change arrived (see step.Proves).
+			differs := linkErr == nil && (in.VisibleName != "" && in.VisibleName != h.Name ||
+				in.Description != "" && in.Description != h.Description ||
+				in.MonitoredBy == "server" && h.MonitoredBy != "0" ||
+				in.MonitoredBy == "proxy" && (h.MonitoredBy != "1" || h.ProxyID != in.ProxyID) ||
+				in.MonitoredBy == "group" && (h.MonitoredBy != "2" || h.ProxyGroupID != in.ProxyGroupID))
+			for _, id := range in.AddGroupIDs {
+				differs = differs || linkErr == nil && !slices.Contains(beforeGroups, id)
+			}
+			for _, id := range in.RemoveGroupIDs {
+				differs = differs || linkErr == nil && slices.Contains(beforeGroups, id)
+			}
+			for _, id := range in.AddTemplateIDs {
+				differs = differs || linkErr == nil && !slices.Contains(beforeTemplates, id)
+			}
+			for _, id := range append(slices.Clone(in.RemoveTemplateIDs), in.ClearTemplateIDs...) {
+				differs = differs || linkErr == nil && slices.Contains(beforeTemplates, id)
 			}
 			return &step{
 				Key: h.HostID, Desc: fmt.Sprintf("update host %q (%s): %s", h.Name, h.Host, strings.Join(changes.notes, "; ")), Before: before,
-				Apply: func() error { _, err := resources.UpdateHost(c, in); return err },
+				Apply:  func() error { _, err := resources.UpdateHost(c, in); return err },
+				Proves: differs,
 				Verify: func() error {
+					now, err := resources.GetHostByID(c, h.HostID)
+					if err != nil {
+						return err
+					}
+					// every requested value, not just the links
+					if in.VisibleName != "" && now.Name != in.VisibleName {
+						return fmt.Errorf("the visible name is %q, expected %q", now.Name, in.VisibleName)
+					}
+					if in.Description != "" && now.Description != in.Description {
+						return fmt.Errorf("the description is not the requested one")
+					}
+					switch in.MonitoredBy {
+					case "server":
+						if now.MonitoredBy != "0" {
+							return fmt.Errorf("the host is not monitored from the server")
+						}
+					case "proxy":
+						if now.MonitoredBy != "1" || now.ProxyID != in.ProxyID {
+							return fmt.Errorf("the host is not monitored through the requested proxy")
+						}
+					case "group":
+						if now.MonitoredBy != "2" || now.ProxyGroupID != in.ProxyGroupID {
+							return fmt.Errorf("the host is not monitored through the requested proxy group")
+						}
+					}
 					g, t, err := resources.HostLinkIDs(c, h.HostID)
 					if err != nil {
 						return err
