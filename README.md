@@ -1,122 +1,251 @@
 # zbxctl
 
-A Zabbix CLI built for LLM agents and operators: predictable subcommands, flat JSON output, structured errors, read-only by default, and a dry run for every write. Single static Go binary, Zabbix 7.0+ (developed against 7.4).
+**A Zabbix command line built for both people and AI agents.** Predictable subcommands, flat JSON output, structured errors, and a dry run for every change. One static binary, no runtime dependencies.
 
-```
-zbxctl get problems --severity high --since 24h
-zbxctl get latestdata web-01 --item cpu
-zbxctl diagnose host web-01
-zbxctl disable host web-01            # dry run: prints what would happen
-zbxctl disable host web-01 --apply    # does it
-```
+<p align="center"><img src="docs/zbxctl.svg" alt="zbxctl in a terminal: a dry run, the same change applied, a grouped problem list, a trigger diagnosis" width="760"></p>
+
+- **Safe by default.** Reads change nothing. Every write is a dry run until you add `--apply`, and bulk writes check the whole target list first, save an audit file, and verify the result.
+- **Made for scripts and agents.** JSON by default, flat objects with readable values (`"status": "monitored"`), stable exit codes, and a machine-readable description of every command (`zbxctl llm capabilities`). An MCP server is built in.
+- **Answers questions, not just API calls.** `diagnose trigger` explains why a problem is stuck, `get problems --group-by name` collapses alert storms, `backtest` replays an alert idea against your history and tells you how often it would have been right.
+- **Zabbix 7.4 and newer.** Detects the server version, or pin it per connection.
+
+## Contents
+
+[Install](#install) · [Quick start](#quick-start) · [Safe by default](#safe-by-default) · [Commands](#commands) · [Recipes](#recipes) · [For agents (llm manifest, MCP)](#for-agents) · [Configuration](#configuration) · [Output and exit codes](#output-and-exit-codes) · [Zabbix versions](#zabbix-versions) · [Development](#development) · [License](#license-and-notices)
 
 ## Install
 
+**From a release** (Linux, macOS, Windows; amd64 and arm64): download the archive for your platform from the [Releases](../../releases) page, check it (below), and put `zbxctl` on your `PATH`. Each archive also contains `LICENSE` and `THIRD_PARTY_NOTICES.md`.
+
+**From source** (Go 1.25 or newer):
+
 ```sh
-make build            # CGO_ENABLED=0 go build, version stamped from git
+git clone https://github.com/mwtrigg/zbxctl
+cd zbxctl
+make build            # or: CGO_ENABLED=0 go build -o zbxctl ./cmd/zbxctl
 ```
 
-Or download a release from [GitHub releases](https://github.com/mwtrigg/zbxctl/releases) and run `zbxctl upgrade` later to self-update.
+### Check what you downloaded
 
-## Configuration
+Every release has a `checksums.txt` and a signature of it, `checksums.txt.sig`, made with the project's release key ([`docs/release-signing-key.pub`](docs/release-signing-key.pub)).
 
-File: `~/.config/zbxctl/config.yaml`; see [`docs/config.example.yaml`](docs/config.example.yaml).
+```sh
+# 1. the signature on the checksums (OpenSSH 8.0 or newer)
+echo "zbxctl-release $(cat docs/release-signing-key.pub)" > allowed_signers
+ssh-keygen -Y verify -f allowed_signers -I zbxctl-release -n zbxctl-release \
+           -s checksums.txt.sig < checksums.txt
+
+# 2. the archive against the checksums
+sha256sum --check --ignore-missing checksums.txt
+```
+
+Release files also carry GitHub build-provenance attestations, so `gh attestation verify zbxctl_linux_amd64.tar.gz --repo mwtrigg/zbxctl` proves which workflow and commit built them.
+
+### Updating
+
+`zbxctl upgrade --check` says whether a newer release exists. `zbxctl upgrade` downloads it and installs it only if the signature on `checksums.txt` is valid for the release key built into your copy and the archive matches its checksum. It downloads only from this project's release page, never installs an older version than the one running, and keeps the previous binary as `zbxctl.old`. If anything cannot be verified it installs nothing.
+
+## Quick start
+
+Create `~/.config/zbxctl/config.yaml` (see [Configuration](#configuration) for everything it can hold):
 
 ```yaml
 current_context: lab
 contexts:
   lab:
     url: https://zabbix.example.com
-    api_token: ""          # preferred over username/password
-    tls_verify: true
-    default_limit: 100
-    permissions: readonly  # readonly | operator | write (default write)
+    api_token: "<your API token>"     # or point ZBXCTL_API_TOKEN at it
 ```
 
-Priority: CLI flag > `ZBXCTL_*` env var (`ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXCTL_CONTEXT`, ...) > config file > default. Never put a token in a command line or commit one.
+Then:
 
-Before-state files (see below) can be turned off per context with `before_state: false` in the config, or with `ZBXCTL_BEFORE_STATE=false`; `state_dir` / `ZBXCTL_STATE_DIR` moves them. The flags `--no-state` and `--state-dir` win over both.
-
-`permissions` caps what a context may do: `readonly` blocks all writes, `operator` allows enable/disable/acknowledge/maintenance, `write` allows everything. `run script` additionally needs the script listed in the context's `allowed_scripts` and a one-time confirmation token.
-
-## The audit trail: before-state files
-
-Every change made with `--apply` saves a before-state file: for each target, what was done and what the target looked like before. Together they are an audit trail of what zbxctl changed. Turn this off with `before_state: false` in the config (per context), `ZBXCTL_BEFORE_STATE=false`, or `--no-state`; `state_dir` / `ZBXCTL_STATE_DIR` / `--state-dir` choose the directory (default `~/.local/state/zbxctl`).
-
-```
-zbxctl state list [--command delete-host] [--older-than 30d]   # newest first
-zbxctl state show <file>                                       # what one file recorded
-zbxctl state prune --older-than 90d [--apply]                  # a dry run until --apply
+```sh
+zbxctl auth status                                  # who am I talking to, and is it supported
+zbxctl get hosts --group "Linux servers" -o table
+zbxctl get problems --severity high --since 24h        # --severity is a minimum
+zbxctl diagnose host web-01                         # one call: problems, events, data, broken items
 ```
 
-Nothing is deleted automatically, and `state prune` only ever touches files zbxctl wrote. These commands read local files and need no Zabbix connection.
+## Safe by default
 
-### Undoing a change by hand
+| What you do | What happens |
+|---|---|
+| Any `get`, `diagnose`, `backtest`, `state`, `diff` | Reads only. Nothing changes. |
+| Any command that changes something | A **dry run**: it prints what it would do and exits 0. Add `--apply` (or `-y`) to do it. |
+| A change to several targets | Every target is resolved first, so a typo changes nothing. `--expect N` refuses to run unless exactly N targets resolve. `--id-file` reads targets from a file. |
+| `--apply` on a change | Saves a **before-state file** (what was done, what the target looked like before), applies the changes one by one, then re-reads each target to **verify** it. |
+| `delete user` | Refuses `Admin` and the user that owns the credentials in use. |
+| Secrets | Passwords and secret macro values come from a file or stdin, never a flag; secret values are never printed or saved. |
+| `run script` | Needs the script on an allowlist in your config and a one-time confirmation code. |
 
-There is deliberately no automatic `restore`: too much can go subtly wrong. The file tells you (or an agent) what to do instead. Find the file with `state list`, read it with `state show`, then run the inverse command:
+Permission tiers cap what a connection may do: `permissions: readonly | operator | write` in the config.
+
+### The audit trail
+
+Every change made with `--apply` saves a before-state file under `~/.local/state/zbxctl/`. Together they are an audit trail of what zbxctl changed, and they give you (or an agent) what is needed to undo a change by hand:
+
+```sh
+zbxctl state list --command delete-host     # newest first
+zbxctl state show delete-host-20261110T031907Z.json
+zbxctl state prune --older-than 90d         # a dry run until --apply
+```
+
+There is deliberately no automatic restore: too much can go subtly wrong (a deleted host's history is gone, secret values are never saved, a closed problem cannot be reopened). The table below says how to reverse each kind of change by hand. Turn the files off with `before_state: false` in the config, `ZBXCTL_BEFORE_STATE=false` or `--no-state`; `state_dir` / `ZBXCTL_STATE_DIR` / `--state-dir` choose where they go. Nothing is ever deleted automatically.
 
 | Change | What the file holds | Undo |
 |---|---|---|
-| `enable` / `disable host`, `trigger` | the status before | the opposite command on the same target |
+| `enable` / `disable` host or trigger | the status before | the opposite command on the same target |
 | `acknowledge` / `unacknowledge` | whether it was acknowledged and closed | the opposite verb (a closed problem cannot be reopened) |
 | `suppress` / `unsuppress` | the event | the opposite verb (an earlier suppression time is not recorded) |
 | `maintenance extend` / `shorten` | the end time before | `maintenance extend\|shorten --until <the old end>` |
 | `maintenance delete` | name, start, end, hosts, groups | `maintenance create` with those values |
-| `delete host` | groups, templates, tags, interfaces, macros (secret values are never saved) | `create host`, then `update host` and `set macro`; history is gone |
-| `delete template` | the full yaml export | `import template <file> --apply` after saving `export_yaml` to a file |
+| `delete host` | groups, templates, tags, interfaces, macros | `create host`, then `update host` and `set macro`; history is gone |
+| `delete template` | the full yaml export | save `export_yaml` to a file, then `import template <file> --apply` |
 | `import template\|host` | the previous yaml export of every object it changed | import that yaml again (objects the import created are not recorded) |
-| `delete group`, `item`, `trigger`, `macro`, `user` | the object's fields | the matching `create`/`set` command with those fields |
+| `delete group`, `item`, `trigger`, `macro`, `valuemap`, `regexp`, `user` | the object's fields | the matching `create` / `set` command with those fields |
 | `delete lost items\|triggers` | what was deleted | nothing to restore: discovery recreates them if the object comes back |
 
-Always do the undo as a dry run first and check it against the file.
+Do the undo as a dry run first and check it against the file.
 
-## Escape hatch
+## Commands
 
-`zbxctl api call <method> --params '{...}'` calls any Zabbix API method and prints the raw result, for the long tail that has no command. Reads (`*.get`, `configuration.export`, ...) run directly; every other method is a dry run until `--apply`, needs the write tier and saves an audit record with secrets masked. `user.login`, `token.generate`, `script.execute` and similar are refused. Prefer a dedicated command whenever one exists: it gives flat results, dry runs and checks.
+Everything below is a dry run unless it is a read. `zbxctl <command> --help` has the flags; `zbxctl llm capabilities` lists them all as JSON.
 
-See [docs/api-coverage.md](docs/api-coverage.md) for what is and is not covered of the Zabbix API.
+**Read**
 
-## MCP server
-
-`zbxctl mcp` serves the commands as [MCP](https://modelcontextprotocol.io) tools over stdio, so an agent can call them without a shell. Each tool call runs zbxctl itself, so the Zabbix URL and token come from the config file or environment of the process that started the server and never pass through the agent.
-
-```json
-{"mcpServers": {"zabbix": {"command": "zbxctl", "args": ["mcp"], "env": {"ZBXCTL_CONTEXT": "lab"}}}}
+```
+get hosts | host | items | latestdata | history | trends | interfaces | macros
+get triggers | problems | events | alerts | auditlog
+get templates | template | groups | users | user | usergroups | scripts | actions
+get proxies | proxy-groups | valuemaps | regexps | discovery | lost items | lost triggers
+diagnose host <host>        diagnose trigger <id> | <event> --event
+backtest --item <key> --when '<condition>'
+auth status | context list | context use <name>
 ```
 
-By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each one is still a dry run until the call passes `apply: true`. Never offered: `run script` (it needs a human to confirm a code), `upgrade`, `context use`, `state prune`, and anything that works on a file path (`export`, `import`, `diff`, and the `--file`/`--dir`/`--*-file` flags). Positional arguments (the host or ID a command works on) go in an `args` array.
+**Change** (each takes `--apply`)
 
-## Zabbix versions
+```
+enable | disable   host | trigger
+acknowledge | unacknowledge | suppress | unsuppress   <event-id>...
+maintenance create | extend | shorten | delete
+create | update | delete   host | group | item | trigger | valuemap | regexp
+create | delete   user | usergroup
+set macro | delete macro        (host or --global)
+tag host | untag host
+update host --proxy <name|none> | --proxy-group <name>
+export | diff | import   template | host
+delete template | delete lost items | delete lost triggers
+run script <name> --host <host>        (allowlist and confirmation code required)
+api call <method> --params '{...}'     (escape hatch: reads run, writes are a dry run)
+```
 
-zbxctl supports Zabbix **7.4 and newer**. It asks the server for its version (no login needed) and adapts; a server older than 7.4 is refused with exit code 6 (`--allow-unsupported` or `ZBXCTL_ALLOW_UNSUPPORTED=1` tries anyway), and one newer than the newest version zbxctl has been tested against (7.4) works but prints a warning. To skip the detection call, or to say which version a context talks to, pin it in the config:
+Handy flags on list commands: `--filter KEY=VALUE`, `--field NAME` (one value per line, for shell use), `-o json|jsonl|table|csv`, `--since 7d` (relative times work everywhere), `--tz America/New_York`.
+
+## Recipes
+
+**Triage a storm of alerts**
+
+```sh
+zbxctl get problems --exclude-orphans --group-by name --since 7d -o table
+zbxctl diagnose trigger 126 --event      # why is this one still open? can it recover?
+```
+
+`--exclude-orphans` drops problems that can never recover (the trigger, host or items behind them are disabled). `--group-by name` collapses the same alert across hosts into one row with a count and the event IDs.
+
+**Change many things safely**
+
+```sh
+printf 'web-01\nweb-02\nweb-03\n' > hosts.txt
+zbxctl disable host --id-file hosts.txt --expect 3          # dry run: shows all three
+zbxctl disable host --id-file hosts.txt --expect 3 --apply  # saves a before-state file, verifies each
+```
+
+**A maintenance window you can stretch**
+
+```sh
+zbxctl maintenance create --name "Patching" --host web-01 --duration 2h --apply
+zbxctl maintenance extend "Patching" --by 1h --apply
+```
+
+**Would this alert have been a good idea?**
+
+```sh
+zbxctl backtest --host web-01 --item system.cpu.util --when 'avg(5m)>90' --since 30d \
+                --real-problem "CPU is high" --summary
+```
+
+Conditions: `last>90`, `avg(5m)>90`, `min(10m)>=80`, `max(1h)<5`, `nodata(10m)`, or an expression that compares items and shares of them, for example a memory-drop rule: `(max(15m) - last) > 10% of last("vm.memory.size[total]") AND last("vm.memory.size[pavailable]") < 50`. With `--real-problem` (or `--real-event`) each fire is judged against real problems on the same host: a true alert with its lead time in minutes, a false alarm, or a problem it missed. `--source trends` replays a year of hourly data.
+
+**History and trends**
+
+```sh
+zbxctl get history --host web-01 --item system.cpu.util --since 7d --gaps-over 10m   # silences
+zbxctl get trends  --host web-01 --item system.cpu.util --since 365d --rollup day -o csv
+```
+
+**Move monitoring, clean up discovery**
+
+```sh
+zbxctl update host web-01 --proxy proxy-eu-1 --apply
+zbxctl get lost items --host web-01
+zbxctl delete lost items --host web-01 --expect 3 --apply     # only objects discovery has lost
+```
+
+## For agents
+
+- **`zbxctl llm capabilities`** prints every command as JSON (flags, examples, output fields, a `dangerous` marker); `zbxctl llm schema <command>` prints one. Neither needs credentials or a network.
+- **Output is predictable**: JSON by default; list commands wrap results as `{"data": [...], "meta": {"count": N, "command": "..."}}`; errors go to stderr as `{"error": "...", "kind": "...", "code": N}`.
+- **An MCP server is built in.** `zbxctl mcp` serves the commands as [MCP](https://modelcontextprotocol.io) tools over stdio. Each tool call runs zbxctl itself, so the Zabbix URL and token come from your config or environment and never pass through the agent:
+
+  ```json
+  {"mcpServers": {"zabbix": {"command": "zbxctl", "args": ["mcp"], "env": {"ZBXCTL_CONTEXT": "lab"}}}}
+  ```
+
+  By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each is still a dry run until the call passes `apply: true`. Never offered: `run script`, `upgrade`, `context use`, `state prune`, and anything that works on a file path.
+
+## Configuration
+
+`~/.config/zbxctl/config.yaml` (see [`docs/config.example.yaml`](docs/config.example.yaml)). Each context is one Zabbix server; pick one with `-c <name>`, `ZBXCTL_CONTEXT`, or `zbxctl context use <name>`.
 
 ```yaml
+current_context: lab
 contexts:
   lab:
-    api_version: "7.4"      # or "8.0"; empty = detect
+    url: https://zabbix.example.com
+    api_token: "<your API token>"   # or username/password; the token is preferred
+    tls_verify: true
+    ca_file: ""                     # trust a custom CA
+    proxy: ""                       # an HTTP proxy for this server
+    default_limit: 100
+    api_version: ""                 # pin e.g. "7.4" or "8.0"; empty = detect
+    permissions: write              # readonly | operator | write
+    allowed_scripts: []             # what `run script` may execute; empty = blocked
+    before_state: true              # audit files for changes made with --apply
+    state_dir: ""                   # empty = ~/.local/state/zbxctl
 ```
 
-`ZBXCTL_API_VERSION` overrides the file. `zbxctl auth status` shows the detected and pinned versions and whether the server is supported.
+Priority for every setting: command-line flag, then environment variable, then the config file, then the default.
 
-## Output and connection options
+| Variable | Meaning |
+|---|---|
+| `ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXCTL_USERNAME`, `ZBXCTL_PASSWORD` | the connection |
+| `ZBXCTL_CONTEXT` | which context to use |
+| `ZBXCTL_INSECURE`, `ZBXCTL_CA_FILE` | TLS (`--insecure` always prints a warning) |
+| `ZBXCTL_API_VERSION` | pin the Zabbix version |
+| `ZBXCTL_BEFORE_STATE`, `ZBXCTL_STATE_DIR` | the before-state files |
+| `ZBXCTL_TZ` | the time zone times are shown in (default UTC) |
+| `ZBXCTL_ALLOW_UNSUPPORTED` | try a Zabbix server older than 7.4 |
 
-`--timeout` (default 180s) bounds each API request, `--retries` (default 2) repeats read-only calls after a connection error or a 502/503/504 (writes are never retried), and `--tz America/New_York` (or `ZBXCTL_TZ`, or `local`) renders times in that zone with an explicit offset instead of UTC.
+Never put a token in a command line or commit one. A token flag does not exist on purpose.
 
-## Output
+## Output and exit codes
 
-JSON is the default. `-o jsonl` gives one object per line, `-o csv` a header plus rows, `-o table` is for humans.
-
-```json
-{"data": [ {...}, {...} ], "meta": {"count": 2, "command": "get hosts"}}
-```
-
-Results are flat objects with readable values (`"status": "monitored"`, times as RFC3339 UTC). `--raw` adds the raw API values (`*_raw`, `*_unix`).
-
-Errors go to stderr as `{"error": "...", "kind": "...", "code": N}`.
+JSON is the default; `-o jsonl` gives one object per line, `-o csv` a header plus rows, `-o table` is for humans. Times are RFC3339 with an explicit offset (UTC unless you set `--tz`); `--raw` adds the raw API values.
 
 | Code | Kind | Meaning |
 |---|---|---|
-| 0 | | success (also a dry run) |
+| 0 | | success (a dry run also exits 0) |
 | 1 | `error` | API or internal error |
 | 2 | `not_found` | host, template, ... not found |
 | 3 | `auth` | token or login refused |
@@ -124,88 +253,19 @@ Errors go to stderr as `{"error": "...", "kind": "...", "code": N}`.
 | 5 | `usage` | invalid flag or argument |
 | 6 | `unsupported_version` | the Zabbix server is older than 7.4 |
 
-## Commands
+## Zabbix versions
 
-Read (never change anything):
-
-```
-get hosts | host | items | latestdata | history | trends | interfaces
-get triggers | problems | events | alerts
-get discovery | lost items | lost triggers
-get proxies | proxy-groups | auditlog | valuemaps | regexps
-get templates | template | groups | users | user | usergroups | scripts | macros | actions
-backtest --item k --when 'avg(5m)>90'   # replay an alert idea over history/trends; judge it against real problems
-diagnose host <host>            # open problems, recent events, latest data, broken items in one call
-diagnose trigger <id>|<event> --event   # why a problem is open: disabled trigger/host/items, unsupported items, suppression, manual close off
-auth status | context list | context use <name>
-```
-
-Write (dry run unless `--apply`; `--yes` is an alias):
-
-```
-enable | disable  host <host> | trigger <id>
-acknowledge <event-id> [--message ...] [--close] [--severity s]   /   unacknowledge <event-id>
-suppress <event-id> [--until 7d]   /   unsuppress <event-id>      # hide a problem for a while; not the same as acknowledging
-maintenance list | create | extend | shorten | delete
-create host | update host | delete host
-tag host <host> --tag k [--value v]   untag host <host> --tag k [--value v]
-create user | delete user | create usergroup | delete usergroup
-create|update|delete group        # host groups; delete refuses groups that still have hosts
-create|update|delete item         # agent, agent-active, trapper, simple, calculated, dependent
-create|update|delete trigger      # from an expression; discovered and template objects are refused
-create|update|delete valuemap    # --map 0=Down --map 1=Up --default Unknown (also --map-ge/-le/-range/-regexp)
-create|update|delete regexp      # --expr 'matches:^(ext4|xfs)$'  (types: contains, any, not-contains, matches, not-matches)
-set macro | delete macro          # host or --global; secret values only from --value-file/--value-stdin
-update host --proxy <name|none> | --proxy-group <name>
-delete template <name> [--allow-linked]   # before-state keeps a full export
-delete lost items|triggers [--host h] [--close-problems]   # only objects that discovery lost
-import template|host <file>       # without --apply: shows the diff only
-run script <name> --host <host>   # dangerous: executes code on a monitored host
-```
-
-Bulk writes: `enable|disable host|trigger`, `acknowledge`, `maintenance extend|shorten|delete` and `delete host` take several targets (arguments and/or `--id-file`, one per line). All targets are resolved first, so a typo changes nothing; `--expect N` refuses to run unless exactly N distinct targets resolve; with `--apply` a before-state file is saved under `~/.local/state/zbxctl/` (`--state-dir`, `--no-state`) and every change is re-read to verify it (`--no-verify` skips that). Acknowledging and suppressing are different things: acknowledge says someone has seen the problem, suppress hides it from the problem list (for a while, or indefinitely). `acknowledge --close` only closes problems whose trigger allows manual close and acknowledges the others instead, then re-checks after about 15 seconds since closing is asynchronous.
-
-`delete user` refuses `Admin` and the user that owns the credentials in use. `create user` takes the password from `--password-file` or `--password-stdin`, never from a flag value.
-
-Export, diff and import of templates and hosts:
-
-```
-zbxctl export template web-base --file web-base.yaml     # yaml | json | xml
-zbxctl diff template web-base.yaml                       # what an import would change, read-only
-zbxctl diff template --dir ./templates                   # the same for every export file in a directory
-zbxctl import template web-base.yaml --apply             # never deletes anything missing from the file; saves the previous export first
-zbxctl export template --dir ./templates --search Linux  # one file per template (hosts: --group <name> or --all)
-zbxctl import template --dir ./templates --expect 12 --apply
-```
-
-Housekeeping: `version`, `upgrade [--check]`, `completion bash|zsh|fish|powershell`.
-
-`--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `get problems` triage flags: `--exclude-orphans` drops problems that can never recover (trigger, host or all items disabled), `--suppressed true|false` and `--maintenance` filter on suppression, `--group-by name` collapses the same alert across hosts into one row with a count, the hosts and the event IDs (handy for `acknowledge`).
-
-Backtesting an alert idea: `zbxctl backtest --host web-01 --item system.cpu.util --when 'avg(5m)>90' --since 7d` lists when the condition would have fired (conditions: `last>N`, `avg(5m)>N`, `min(10m)>=N`, `max(1h)<N`, `nodata(10m)`). Add `--real-problem "CPU is high"` (or `--real-event ID`) to judge each fire against real problems on the same host: true alert with its lead time in minutes, false alarm, and missed problems; `--summary` gives one row per host. Use `--source trends` for year-long windows. Conditions can also compare items and shares of them, for example a memory-drop rule: `--when '(max(15m) - last) > 10% of last("vm.memory.size[total]") AND last("vm.memory.size[pavailable]") < 50'` (a call with a quoted key reads that other item on the same host; unquoted calls read `--item`; `10% of X` is 0.10 * X; `+ - * /`, `AND`, `OR` and parentheses work).
-
-History and trends: `get history --all` pages through a whole window (no 100-row stop), `--step 5m` keeps one value per bucket, `--gaps-over 10m` lists the silences instead of the samples; `get trends` returns hourly min/avg/max of numeric items for baselines and long look-backs; `--rollup day|week|month` folds them into days, weeks (Monday start) or months in the `--tz` zone.
-
-`--host` and `--group` accept an ID or a name.
-
-On list commands `--filter KEY=VALUE` (repeatable) adds an exact-match API filter and `--field NAME` prints just that field, one value per line, for shell use.
-
-## For agents
-
-`zbxctl llm capabilities` prints the full command manifest as JSON (flags, examples, output fields, a `dangerous` marker); `zbxctl llm schema <command>` prints one entry. Neither needs authentication or network.
-
-## TLS
-
-`--insecure` (or `tls_verify: false`) skips verification and always prints a warning to stderr. Use `ca_file` to trust a custom CA.
+zbxctl supports Zabbix **7.4 and newer**. It asks the server for its version (no login needed) and adapts. A server older than 7.4 is refused with exit code 6 (`--allow-unsupported` tries anyway). A server newer than the newest version zbxctl has been tested against (7.4) works but prints a warning. Pin a version per connection with `api_version`, which also skips the detection call. `zbxctl auth status` shows what was detected. [`docs/api-coverage.md`](docs/api-coverage.md) lists what is and is not covered of the API.
 
 ## Development
 
 ```sh
 go vet ./... && go test ./...
+make build
 ```
 
-Tests run against a fake Zabbix API server; no live instance is needed.
+The tests run against a fake Zabbix API server; no Zabbix instance is needed. See [CONTRIBUTING.md](CONTRIBUTING.md) and, for working on the code (or with an agent), [AGENTS.md](AGENTS.md). Report security problems privately: [SECURITY.md](SECURITY.md).
 
-## License
+## License and notices
 
-MIT, see [LICENSE](LICENSE).
+zbxctl is released under the [MIT License](LICENSE), Copyright (c) 2026 Michael Trigg. It is built with third-party open-source software, each used under its own license; the full texts are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), which is also included in every release archive.
