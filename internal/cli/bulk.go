@@ -100,18 +100,27 @@ func collectTargets(args []string) ([]string, error) {
 	return out, nil
 }
 
+// defaultStateDir is where before-state files go unless --state-dir,
+// ZBXCTL_STATE_DIR or state_dir in the config says otherwise.
+func defaultStateDir() (string, error) {
+	base := os.Getenv("XDG_STATE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(base, "zbxctl"), nil
+}
+
 func stateFilePath(name string) (string, error) {
 	dir := bulkStateDir
 	if dir == "" {
-		base := os.Getenv("XDG_STATE_HOME")
-		if base == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", err
-			}
-			base = filepath.Join(home, ".local", "state")
+		var err error
+		if dir, err = defaultStateDir(); err != nil {
+			return "", err
 		}
-		dir = filepath.Join(base, "zbxctl")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err

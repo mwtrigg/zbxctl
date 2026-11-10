@@ -535,3 +535,91 @@ func TestBeforeStateCanBeDisabledByEnvAndOverriddenByFlag(t *testing.T) {
 		t.Fatalf("on by default: err=%v files=%v", lastErr, stateFiles(dir3))
 	}
 }
+
+func writeStateFixture(t *testing.T, dir, name, command string, age time.Duration, items int) {
+	t.Helper()
+	its := make([]map[string]any, items)
+	for i := range its {
+		its[i] = map[string]any{"target": strconv.Itoa(i), "action": "do " + command, "before": map[string]any{"x": i}}
+	}
+	b, _ := json.Marshal(map[string]any{"command": command, "time": time.Now().Add(-age).UTC().Format(time.RFC3339), "items": its})
+	if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStateListShowAndPrune(t *testing.T) {
+	defer func() { stateDirFlag, stateCommand, stateOlderThan = "", "", "" }()
+	dir := t.TempDir()
+	writeStateFixture(t, dir, "delete-host-old.json", "delete-host", 100*24*time.Hour, 2)
+	writeStateFixture(t, dir, "disable-host-new.json", "disable-host", time.Hour, 1)
+	writeStateFixture(t, dir, "delete-host-mid.json", "delete-host", 40*24*time.Hour, 1)
+	os.WriteFile(filepath.Join(dir, "notes.json"), []byte(`{"hello":"not ours"}`), 0o600)
+	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("x"), 0o600)
+
+	out, _ := runCLI(t, "state", "list", "--state-dir", dir)
+	var env struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || len(env.Data) != 3 {
+		t.Fatalf("list should show the 3 zbxctl files and skip the others: %q (%v)", out, err)
+	}
+	if env.Data[0]["file"] != "disable-host-new.json" || env.Data[2]["file"] != "delete-host-old.json" {
+		t.Fatalf("newest first: %v", env.Data)
+	}
+	stateCommand = ""
+	out, _ = runCLI(t, "state", "list", "--state-dir", dir, "--command", "delete-host")
+	stateCommand = ""
+	if err := json.Unmarshal([]byte(out), &env); err != nil || len(env.Data) != 2 {
+		t.Fatalf("--command filter: %q", out)
+	}
+
+	out, _ = runCLI(t, "state", "show", "delete-host-old.json", "--state-dir", dir)
+	if lastErr != nil || !strings.Contains(out, `"do delete-host"`) {
+		t.Fatalf("show: err=%v out=%q", lastErr, out)
+	}
+	_, _ = runCLI(t, "state", "show", "notes.json", "--state-dir", dir)
+	if lastErr == nil {
+		t.Fatal("show must refuse a file that is not a before-state file")
+	}
+
+	// prune needs --older-than, is a dry run by default, and only removes matching zbxctl files
+	stateOlderThan = ""
+	_, _ = runCLI(t, "state", "prune", "--state-dir", dir)
+	if lastErr == nil {
+		t.Fatal("prune without --older-than must refuse")
+	}
+	stateOlderThan = ""
+	runCLI(t, "state", "prune", "--state-dir", dir, "--older-than", "30d")
+	if len(stateFiles(dir)) != 4 { // 3 ours + notes.json
+		t.Fatalf("dry run deleted something: %v", stateFiles(dir))
+	}
+	stateOlderThan = ""
+	_, _ = runCLI(t, "state", "prune", "--state-dir", dir, "--older-than", "30d", "--expect", "5", "--apply")
+	if lastErr == nil || len(stateFiles(dir)) != 4 {
+		t.Fatalf("--expect mismatch must delete nothing: err=%v", lastErr)
+	}
+	bulkExpect, stateOlderThan = -1, ""
+	runCLI(t, "state", "prune", "--state-dir", dir, "--older-than", "30d", "--apply")
+	left := stateFiles(dir)
+	if lastErr != nil || len(left) != 2 {
+		t.Fatalf("prune should leave the new file and the foreign one: err=%v left=%v", lastErr, left)
+	}
+	for _, f := range left {
+		if strings.Contains(f, "old") || strings.Contains(f, "mid") {
+			t.Fatalf("an old file survived: %v", left)
+		}
+	}
+	bulkExpect = -1
+}
+
+func TestStateDirComesFromEnvWhenNoFlag(t *testing.T) {
+	defer func() { stateDirFlag = "" }()
+	dir := t.TempDir()
+	writeStateFixture(t, dir, "a.json", "disable-host", time.Hour, 1)
+	t.Setenv("ZBXCTL_STATE_DIR", dir)
+	out, _ := runCLI(t, "state", "list")
+	if !strings.Contains(out, "a.json") {
+		t.Fatalf("ZBXCTL_STATE_DIR not used: %q", out)
+	}
+}
