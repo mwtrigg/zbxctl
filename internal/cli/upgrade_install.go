@@ -259,7 +259,9 @@ func replaceFile(execPath string, content []byte) error {
 }
 
 // olderRelease reports whether latest is a lower version than current. Versions
-// that do not parse (a development build) are never considered older.
+// that do not parse (a development build) are never considered older. A
+// pre-release (v0.1.0-rc.1) is lower than the release it leads up to (v0.1.0), so a
+// running 0.1.0 is never "upgraded" to its own release candidate.
 func olderRelease(current, latest string) bool {
 	c, cok := semverParts(current)
 	l, lok := semverParts(latest)
@@ -271,7 +273,22 @@ func olderRelease(current, latest string) bool {
 			return l[i] < c[i]
 		}
 	}
-	return false
+	cp, lp := prerelease(current), prerelease(latest)
+	switch {
+	case cp == lp:
+		return false
+	case cp == "": // current is the release, latest is a pre-release of it
+		return true
+	case lp == "": // latest is the release, current a pre-release of it
+		return false
+	}
+	return lp < cp
+}
+
+// prerelease returns the part after the first "-" of a version ("rc.1"), or "".
+func prerelease(v string) string {
+	_, pre, _ := strings.Cut(strings.TrimPrefix(v, "v"), "-")
+	return pre
 }
 
 func semverParts(v string) ([3]int, bool) {

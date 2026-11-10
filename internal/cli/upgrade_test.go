@@ -262,12 +262,18 @@ func TestReplaceFileKeepsABackupAndRestoresOnFailure(t *testing.T) {
 }
 
 func TestNeverDowngrades(t *testing.T) {
-	for cur, c := range map[string]struct {
-		latest string
-		older  bool
-	}{"0.2.0": {"v0.1.9", true}, "v1.0.0": {"1.0.0", false}, "0.1.0": {"v0.2.0", false}, "1.2.3": {"1.10.0", false}, "dev": {"v0.1.0", false}, "0.0.0-SNAPSHOT-abc": {"v0.0.1", false}} {
-		if olderRelease(cur, c.latest) != c.older {
-			t.Errorf("current %s, latest %s: older=%v want %v", cur, c.latest, !c.older, c.older)
+	for _, c := range []struct {
+		current, latest string
+		older           bool
+	}{
+		{"0.2.0", "v0.1.9", true}, {"v1.0.0", "1.0.0", false}, {"0.1.0", "v0.2.0", false}, {"1.2.3", "1.10.0", false},
+		{"dev", "v0.1.0", false}, {"0.0.0-SNAPSHOT-abc", "v0.0.1", false},
+		// a release candidate is below the release it leads to, and a release never "upgrades" to its own rc
+		{"0.1.0", "v0.1.0-rc.1", true}, {"0.1.0-rc.1", "v0.1.0", false}, {"0.1.0-rc.2", "v0.1.0-rc.1", true},
+		{"0.1.0-rc.1", "v0.1.0-rc.1", false}, {"0.1.0-rc.1", "v0.1.0-rc.2", false},
+	} {
+		if olderRelease(c.current, c.latest) != c.older {
+			t.Errorf("current %s, latest %s: older=%v want %v", c.current, c.latest, !c.older, c.older)
 		}
 	}
 }

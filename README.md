@@ -17,7 +17,7 @@
 
 **From a release** (Linux, macOS, Windows; amd64 and arm64): download the archive for your platform from the [Releases](../../releases) page, check it (below), and put `zbxctl` on your `PATH`. Each archive also contains `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
-**From source** (Go 1.25 or newer):
+**From source** (Go 1.26 or newer):
 
 ```sh
 git clone https://github.com/mwtrigg/zbxctl
@@ -132,7 +132,7 @@ There is deliberately no automatic restore: too much can go subtly wrong (a dele
 | `enable` / `disable` host or trigger | the status before | the opposite command on the same target |
 | `acknowledge` / `unacknowledge` | whether it was acknowledged and closed | the opposite verb (a closed problem cannot be reopened) |
 | `suppress` / `unsuppress` | the event | the opposite verb (an earlier suppression time is not recorded) |
-| `maintenance extend` / `shorten` | the end time before | `maintenance extend\|shorten --until <the old end>` |
+| `maintenance extend` / `shorten` | the end time before | `maintenance extend --until <the old end>` if it was later, or `maintenance shorten --by <the difference>` if it was earlier |
 | `maintenance delete` | name, start, end, hosts, groups | `maintenance create` with those values |
 | `update host` | name, description, groups, templates (names and IDs), monitoring source | `update host` with the old values; `--clear-template` also deletes items and history, which no file can bring back |
 | `delete host` | groups, templates, tags, macros (secret values excluded), description, monitoring source, and every interface with its type, address, port and SNMP setup (secrets masked) | `create host`, then `update host` and `set macro`; history is gone |

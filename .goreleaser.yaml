@@ -59,13 +59,10 @@ sboms:
   - id: archive-sboms
     artifacts: archive
 
+# The release notes come from CHANGELOG.md (scripts/release-notes.sh, passed with
+# --release-notes), never from commit subjects, which can name internal things.
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
+  disable: true
 
 release:
   prerelease: auto
