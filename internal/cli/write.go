@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -207,8 +208,13 @@ func runSetTriggerStatus(id string, enable bool) error {
 // ── acknowledge ───────────────────────────────────────────────────────────────
 
 var (
-	ackMessage string
-	ackClose   bool
+	ackMessage       string
+	ackClose         bool
+	ackUnack         bool
+	ackSuppress      bool
+	ackUnsuppress    bool
+	ackSuppressUntil string
+	ackSeverity      string
 )
 
 var acknowledgeCmd = &cobra.Command{
@@ -221,6 +227,11 @@ var acknowledgeCmd = &cobra.Command{
 func init() {
 	acknowledgeCmd.Flags().StringVar(&ackMessage, "message", "", "acknowledgement message")
 	acknowledgeCmd.Flags().BoolVar(&ackClose, "close", false, "also close the problem")
+	acknowledgeCmd.Flags().BoolVar(&ackUnack, "unacknowledge", false, "remove the acknowledgement instead")
+	acknowledgeCmd.Flags().BoolVar(&ackSuppress, "suppress", false, "suppress the problem (hide it from the problem list)")
+	acknowledgeCmd.Flags().StringVar(&ackSuppressUntil, "until", "", "with --suppress: suppress until this time (unix, RFC3339, YYYY-MM-DD, 24h, 7d); default indefinitely")
+	acknowledgeCmd.Flags().BoolVar(&ackUnsuppress, "unsuppress", false, "lift a suppression")
+	acknowledgeCmd.Flags().StringVar(&ackSeverity, "severity", "", "also change the problem severity (0-5 or name)")
 }
 
 func runAcknowledge(cmd *cobra.Command, args []string) error {
@@ -234,37 +245,82 @@ func runAcknowledge(cmd *cobra.Command, args []string) error {
 
 	eventID := args[0]
 
-	prompt := fmt.Sprintf("acknowledge event %s?", eventID)
-	if ackClose {
-		prompt = fmt.Sprintf("acknowledge and close event %s?", eventID)
+	p := resources.AcknowledgeParams{EventID: eventID, Message: ackMessage, Close: ackClose, Severity: -1, Action: resources.ActionAcknowledge}
+	exclusive := 0
+	for _, on := range []bool{ackUnack, ackSuppress, ackUnsuppress} {
+		if on {
+			exclusive++
+		}
 	}
-	if !confirm(prompt) {
-		return nil
+	if exclusive > 1 {
+		return cliPrintErr(outFmt, "--unacknowledge, --suppress and --unsuppress are mutually exclusive", output.ExitUsage)
+	}
+	if exclusive == 1 && ackClose {
+		return cliPrintErr(outFmt, "--close only applies when acknowledging", output.ExitUsage)
+	}
+	if ackSuppressUntil != "" && !ackSuppress {
+		return cliPrintErr(outFmt, "--until only applies with --suppress", output.ExitUsage)
+	}
+	verb := "acknowledge"
+	switch {
+	case ackUnack:
+		p.Action, verb = resources.ActionUnacknowledge, "unacknowledge"
+	case ackSuppress:
+		p.Action, verb = resources.ActionSuppress, "suppress"
+		if ackSuppressUntil != "" {
+			ts, err := parseTimestamp(ackSuppressUntil)
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			p.SuppressUntil = ts
+		}
+	case ackUnsuppress:
+		p.Action, verb = resources.ActionUnsuppress, "unsuppress"
+	case ackClose:
+		verb = "acknowledge and close"
+	}
+	if ackSeverity != "" {
+		sev, ok := parseSeverityFlag(ackSeverity)
+		if !ok {
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --severity %q: use 0-5 or a severity name", ackSeverity), output.ExitUsage)
+		}
+		p.Severity = sev
 	}
 
-	err = resources.AcknowledgeEvent(c, resources.AcknowledgeParams{
-		EventID: eventID,
-		Message: ackMessage,
-		Close:   ackClose,
-	})
-	if err != nil {
+	if !confirm(fmt.Sprintf("%s event %s?", verb, eventID)) {
+		return nil
+	}
+	if err := resources.AcknowledgeEvent(c, p); err != nil {
 		return cliFail(outFmt, err)
 	}
 
-	row := map[string]any{
-		"eventid":      eventID,
-		"acknowledged": "yes",
-		"closed":       fmt.Sprintf("%v", ackClose),
+	row := map[string]any{"eventid": eventID, "action": string(p.Action)}
+	if ackClose && p.Action == resources.ActionAcknowledge {
+		row["closed"] = true
 	}
 	if ackMessage != "" {
 		row["message"] = ackMessage
 	}
-
+	if p.Severity >= 0 {
+		row["severity"] = severityLabel(strconv.Itoa(p.Severity))
+	}
 	return output.Print(outFmt, []output.Column{
 		{Key: "eventid", Header: "EVENT_ID"},
-		{Key: "acknowledged", Header: "ACKNOWLEDGED"},
-		{Key: "closed", Header: "CLOSED"},
+		{Key: "action", Header: "ACTION"},
 	}, []map[string]any{row})
+}
+
+// parseSeverityFlag accepts 0-5 or a severity name.
+func parseSeverityFlag(s string) (int, bool) {
+	if n, err := strconv.Atoi(s); err == nil && n >= 0 && n <= 5 {
+		return n, true
+	}
+	for i, name := range []string{"not_classified", "information", "warning", "average", "high", "disaster"} {
+		if strings.EqualFold(s, name) {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 // ── maintenance create ────────────────────────────────────────────────────────
