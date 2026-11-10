@@ -78,7 +78,13 @@ zbxctl diagnose host web-01                         # one call: problems, events
 | Secrets | Passwords and secret macro values come from a file or stdin, never a flag; secret values are never printed or saved. |
 | `run script` | Needs the operator tier, the script on an allowlist pinned to its command (`name@sha256:<hash>`, so an edited script is refused), and a one-time code typed at a terminal (read from `/dev/tty`, so it cannot be piped in). |
 
-Permission tiers cap what a connection may do: `permissions: readonly | operator | write` in the config.
+Permission tiers cap what a connection may do: `permissions: readonly | operator | write` in the config. A tier includes the ones below it; a misspelt tier is a config error, never full access.
+
+| Tier | Allows |
+|---|---|
+| `readonly` | every `get`, `diagnose`, `export`, `state list/show`, `api call` for read methods; nothing that changes Zabbix |
+| `operator` | the above, plus day-to-day operations: `enable` / `disable` host or trigger, `acknowledge` / `unacknowledge` / `suppress` / `unsuppress`, `maintenance create` / `extend` / `shorten` / `delete`, and `run script` (still behind its pinned allowlist) |
+| `write` (the default when `permissions` is not set) | everything else: create, update and delete hosts, templates, groups, items, triggers, macros, value maps, regular expressions and users, tags, `import`, and `api call` writes |
 
 ### The audit trail
 
@@ -100,7 +106,7 @@ There is deliberately no automatic restore: too much can go subtly wrong (a dele
 | `maintenance extend` / `shorten` | the end time before | `maintenance extend\|shorten --until <the old end>` |
 | `maintenance delete` | name, start, end, hosts, groups | `maintenance create` with those values |
 | `update host` | name, description, groups, templates (names and IDs), monitoring source | `update host` with the old values; `--clear-template` also deletes items and history, which no file can bring back |
-| `delete host` | groups, templates, tags, interfaces, macros | `create host`, then `update host` and `set macro`; history is gone |
+| `delete host` | groups, templates, tags, macros (secret values excluded), description, monitoring source, and every interface with its type, address, port and SNMP setup (secrets masked) | `create host`, then `update host` and `set macro`; history is gone |
 | `delete template` | the full yaml export | save `export_yaml` to a file, then `import template <file> --apply` |
 | `import template\|host` | the previous yaml export of every object it changed | import that yaml again (objects the import created are not recorded) |
 | `delete group`, `item`, `trigger`, `macro`, `valuemap`, `regexp`, `user`, `usergroup` | the object's fields | the matching `create` / `set` command with those fields |

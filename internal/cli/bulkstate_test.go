@@ -156,3 +156,30 @@ func TestTheStateFileRecordsWhatHappenedToEachTarget(t *testing.T) {
 		t.Fatalf("per-target outcomes: %+v", d)
 	}
 }
+
+func TestDeleteHostBeforeStateHoldsWhatARebuildNeedsAndNoSecrets(t *testing.T) {
+	f := &fakeZabbix{Handler: func(call rpcCall) fakeReply {
+		if call.Method == "host.get" {
+			return fakeReply{Result: `[{"hostid":"10","host":"sw1","name":"Switch 1","status":"0","description":"core switch","monitored_by":"1","proxyid":"4",
+				"hostgroups":[{"name":"Network"}],"parentTemplates":[{"name":"SNMP"}],"tags":[],"macros":[],
+				"interfaces":[{"type":"2","main":"1","useip":"1","ip":"10.0.0.9","dns":"","port":"161","details":{"version":"2","community":"s3cretCommunity"}}]}]`}
+		}
+		return fakeReply{}
+	}}
+	if _, err := runFake(t, f, "delete", "host", "sw1", "--apply", "--no-verify"); err != nil {
+		t.Fatal(err)
+	}
+	files := xdgStateFiles(t)
+	if len(files) != 1 {
+		t.Fatalf("state files: %v", files)
+	}
+	b, _ := os.ReadFile(files[0])
+	if strings.Contains(string(b), "s3cretCommunity") {
+		t.Fatalf("an SNMP community must not be saved:\n%s", b)
+	}
+	for _, want := range []string{`"type": "snmp"`, `"port": "161"`, `"useip": true`, `"description": "core switch"`, `"proxyid": "4"`, `"version": "2"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("the before-state lacks %s:\n%s", want, b)
+		}
+	}
+}

@@ -114,8 +114,6 @@ func runUpdateHost(cmd *cobra.Command, args []string) error {
 			in := changes.in
 			in.HostID = h.HostID
 			before := hostBefore(h)
-			before["description"] = h.Description
-			before["monitored_by"], before["proxyid"], before["proxy_groupid"] = h.MonitoredBy, h.ProxyID, h.ProxyGroupID
 			// hostBefore keeps names; the IDs are what a restore needs.
 			if g, t, err := resources.HostLinkIDs(c, h.HostID); err == nil {
 				before["group_ids"], before["template_ids"] = g, t

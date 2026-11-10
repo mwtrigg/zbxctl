@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -28,16 +29,23 @@ func hostBefore(h *resources.Host) map[string]any {
 			macros[i] = m.Macro + "=" + m.Value
 		}
 	}
-	ifaces := make([]string, len(h.Interfaces))
+	// Everything needed to put the interfaces back: type, address, port, whether it
+	// is the main one and how SNMP is set up. SNMP secrets are masked, like every
+	// secret in a before-state file.
+	ifaces := make([]map[string]any, len(h.Interfaces))
 	for i, f := range h.Interfaces {
-		addr := f.IP
-		if addr == "" {
-			addr = f.DNS
+		var details any
+		if len(f.Details) > 0 {
+			_ = json.Unmarshal(f.Details, &details)
 		}
-		ifaces[i] = addr + ":" + f.Port
+		ifaces[i] = map[string]any{
+			"type": map[string]string{"1": "agent", "2": "snmp", "3": "ipmi", "4": "jmx"}[f.Type], "main": f.Main == "1", "useip": f.UseIP == "1",
+			"ip": f.IP, "dns": f.DNS, "port": f.Port, "details": maskSecrets(details),
+		}
 	}
 	return map[string]any{
-		"hostid": h.HostID, "host": h.Host, "name": h.Name, "status": hostStatusLabel(h.Status),
+		"hostid": h.HostID, "host": h.Host, "name": h.Name, "status": hostStatusLabel(h.Status), "description": h.Description,
+		"monitored_by": h.MonitoredBy, "proxyid": h.ProxyID, "proxy_groupid": h.ProxyGroupID,
 		"groups": h.GroupNames(), "templates": h.TemplateNames(), "tags": tags, "macros": macros, "interfaces": ifaces,
 	}
 }

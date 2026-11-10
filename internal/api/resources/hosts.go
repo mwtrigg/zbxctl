@@ -41,6 +41,12 @@ type HostIface struct {
 	Port      string `json:"port"`
 	Main      string `json:"main"`
 	Available string `json:"available"` // "0"=unknown, "1"=available, "2"=unavailable
+	Type      string `json:"type"`      // "1" agent, "2" SNMP, "3" IPMI, "4" JMX
+	UseIP     string `json:"useip"`     // "1" connect by IP, "0" by DNS
+
+	// Details holds the SNMP settings (version, community or v3 credentials);
+	// Zabbix sends [] when there are none, so it stays raw.
+	Details json.RawMessage `json:"details"`
 }
 
 // HostTag is a host tag.
@@ -90,7 +96,7 @@ func names(refs []NamedRef) []string {
 func hostSelects(params map[string]any, detail bool) {
 	params["selectHostGroups"] = []string{"name"}
 	params["selectParentTemplates"] = []string{"name"}
-	params["selectInterfaces"] = []string{"ip", "dns", "port", "main", "available"}
+	params["selectInterfaces"] = []string{"ip", "dns", "port", "main", "available", "type", "useip", "details"}
 	if detail {
 		params["selectTags"] = []string{"tag", "value"}
 		params["selectMacros"] = []string{"macro", "value", "type"}

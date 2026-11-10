@@ -105,11 +105,14 @@ func runUpgrade(_ *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "upgrading %s → %s\n", current, latest)
 
-	if !flagYes {
+	if olderRelease(current, latest) {
+		return cliPrintErr(outFmt, fmt.Sprintf("the latest release (%s) is older than the version running (%s); not downgrading", latest, current), output.ExitError)
+	}
+	if !flagApply { // --yes sets flagApply too
 		// The question goes to stderr and stdout stays clean for the JSON result.
 		// With no terminal to answer it, ask for --yes instead of waiting on a pipe.
 		if !isTerminal(os.Stdin) {
-			return cliPrintErr(outFmt, "upgrade needs your confirmation: run it at a terminal, or pass --yes", output.ExitUsage)
+			return cliPrintErr(outFmt, "upgrade needs your confirmation: run it at a terminal, or pass --apply (or --yes)", output.ExitUsage)
 		}
 		fmt.Fprintf(os.Stderr, "continue? [y/N] ")
 		var answer string
@@ -120,9 +123,6 @@ func runUpgrade(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	if olderRelease(current, latest) {
-		return cliPrintErr(outFmt, fmt.Sprintf("the latest release (%s) is older than the version running (%s); not downgrading", latest, current), output.ExitError)
-	}
 	fmt.Fprintf(os.Stderr, "downloading and verifying %s...\n", archiveName(latest, runtime.GOOS, runtime.GOARCH))
 	if err := installLatest(ctx, rel); err != nil {
 		return cliPrintErr(outFmt, "upgrade failed: "+err.Error(), output.ExitError)
