@@ -10,6 +10,8 @@ file (`scripts/release-notes.sh`).
 ## [Unreleased]
 
 ### Changed
+- `zbxctl upgrade` removes the previous binary once the new one has started and answered (it used to leave `zbxctl.old`
+  behind); if the new binary does not run, the old one is put back. `--keep-old` keeps the old one.
 - Docs: the release environment holds the signing key and accepts only `v*` tags, but requires no reviewer; the
   controls are the verify job, the tag-on-main check and the tag ruleset (CONTRIBUTING.md, SECURITY.md, release.yml).
 

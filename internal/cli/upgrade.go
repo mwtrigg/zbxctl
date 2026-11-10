@@ -49,6 +49,7 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	upgradeCmd.Flags().BoolVar(&upgradeCheckOnly, "check", false, "check for updates without installing")
+	upgradeCmd.Flags().BoolVar(&upgradeKeepOld, "keep-old", false, "keep the previous binary next to the new one as zbxctl.old (otherwise it is removed once the new one has started)")
 }
 
 func runVersion(_ *cobra.Command, _ []string) error {

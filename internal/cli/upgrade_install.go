@@ -11,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mwtrigg/zbxctl/internal/sshsig"
 	"github.com/mwtrigg/zbxctl/internal/version"
@@ -212,9 +214,13 @@ func installLatest(ctx context.Context, rel *githubRelease) error {
 // installBinary replaces the running executable; tests swap it out.
 var installBinary = replaceExecutable
 
-// replaceExecutable swaps the running executable for new content. The old
-// binary is kept next to it as zbxctl.old so a bad update can be undone, and is
-// put back if the swap fails.
+// upgradeKeepOld is --keep-old: leave the previous binary next to the new one.
+var upgradeKeepOld bool
+
+// replaceExecutable swaps the running executable for new content. The old binary is moved
+// aside during the swap and put back if it fails. Once the new binary has been started and
+// answered, the old one is removed (unless --keep-old); if the new binary does not run, the
+// old one is restored.
 func replaceExecutable(content []byte) error {
 	execPath, err := os.Executable()
 	if err != nil {
@@ -223,7 +229,40 @@ func replaceExecutable(content []byte) error {
 	if execPath, err = filepath.EvalSymlinks(execPath); err != nil {
 		return fmt.Errorf("could not resolve the binary path: %w", err)
 	}
-	return replaceFile(execPath, content)
+	return replaceExecutableAt(execPath, content, upgradeKeepOld, smokeRun)
+}
+
+// replaceExecutableAt is replaceExecutable for an explicit path and smoke test.
+func replaceExecutableAt(execPath string, content []byte, keepOld bool, smoke func(path string) error) error {
+	if err := replaceFile(execPath, content); err != nil {
+		return err
+	}
+	old := execPath + ".old"
+	if err := smoke(execPath); err != nil {
+		// the new binary does not run (a bad download for this machine, say): put the old one back
+		if rerr := renameFn(old, execPath); rerr != nil {
+			return fmt.Errorf("the new binary does not run (%v) and the old one could not be put back (%v): it is at %s", err, rerr, old)
+		}
+		return fmt.Errorf("the new binary does not run (%v); the old one was restored", err)
+	}
+	if !keepOld {
+		_ = os.Remove(old) // can fail where the old binary is still running (Windows): then it stays
+	}
+	return nil
+}
+
+// smokeRun starts the installed binary and asks for its version.
+func smokeRun(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "version", "-o", "json").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+	}
+	if !strings.Contains(string(out), `"version"`) {
+		return fmt.Errorf("unexpected output %q", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // renameFn is os.Rename; tests replace it to simulate a failing swap.

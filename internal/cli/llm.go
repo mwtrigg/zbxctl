@@ -1068,6 +1068,7 @@ var capabilities = []CommandSchema{
 		Description: "Self-update zbxctl to the latest GitHub release. Fetches release metadata, compares versions, and atomically replaces the binary.",
 		Flags: append(globalFlags(),
 			FlagSchema{Name: "check", Type: "bool", Description: "Report available version without installing.", Required: false, Default: false},
+			FlagSchema{Name: "keep-old", Type: "bool", Description: "Keep the previous binary next to the new one as zbxctl.old (otherwise it is removed once the new one has started).", Required: false, Default: false},
 			FlagSchema{Name: "apply", Type: "bool", Description: "Execute the change. Without it the command only prints what it would do and changes nothing (--yes is an alias).", Required: false, Default: false},
 		),
 		OutputFields: []string{"current_version", "latest_version", "updated"},
