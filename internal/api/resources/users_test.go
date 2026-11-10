@@ -97,3 +97,24 @@ func TestLatestDataLimitSkipsNeverCollected(t *testing.T) {
 		t.Fatal("limit must not be sent to item.get")
 	}
 }
+
+// maintenance.create takes host/group objects; "hostids"/"groupids" no longer exist.
+func TestCreateMaintenanceUsesHostAndGroupObjects(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"maintenance.create": `{"maintenanceids":["7"]}`})
+	id, err := CreateMaintenance(c, CreateMaintenanceParams{Name: "m", HostIDs: []string{"10"}, GroupIDs: []string{"4"}, ActiveSince: 100, ActiveTill: 400})
+	if err != nil || id != "7" {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	if _, bad := p["hostids"]; bad {
+		t.Fatal("still sends hostids")
+	}
+	if _, bad := p["groupids"]; bad {
+		t.Fatal("still sends groupids")
+	}
+	h := p["hosts"].([]any)[0].(map[string]any)
+	g := p["groups"].([]any)[0].(map[string]any)
+	if h["hostid"] != "10" || g["groupid"] != "4" {
+		t.Fatalf("hosts=%v groups=%v", h, g)
+	}
+}
