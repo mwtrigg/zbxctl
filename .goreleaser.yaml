@@ -35,6 +35,24 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# checksums.txt is signed with an ed25519 SSH key: `zbxctl upgrade` verifies
+# checksums.txt.sig against the public key compiled into the binary
+# (internal/cli/release_keys.go). The key file path comes from the environment;
+# the release workflow writes the ZBXCTL_SIGNING_KEY secret there.
+signs:
+  - id: checksums
+    artifacts: checksum
+    cmd: ssh-keygen
+    args:
+      - -Y
+      - sign
+      - -f
+      - "{{ .Env.ZBXCTL_SIGNING_KEY_FILE }}"
+      - -n
+      - zbxctl-release
+      - "${artifact}"
+    signature: "${artifact}.sig"
+
 # A software bill of materials (SPDX) for each archive; needs syft on PATH.
 sboms:
   - id: archive-sboms

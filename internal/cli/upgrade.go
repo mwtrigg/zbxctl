@@ -116,6 +116,9 @@ func runUpgrade(_ *cobra.Command, _ []string) error {
 		}
 	}
 
+	if olderRelease(current, latest) {
+		return cliPrintErr(outFmt, fmt.Sprintf("the latest release (%s) is older than the version running (%s); not downgrading", latest, current), output.ExitError)
+	}
 	if outFmt == output.FormatTable {
 		fmt.Printf("downloading and verifying %s...\n", archiveName(runtime.GOOS, runtime.GOARCH))
 	}
