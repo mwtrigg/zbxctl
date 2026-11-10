@@ -27,7 +27,16 @@ type Context struct {
 	DefaultLimit   int      `yaml:"default_limit"`   // default 100
 	Permissions    string   `yaml:"permissions"`     // readonly | operator | write; default write
 	AllowedScripts []string `yaml:"allowed_scripts"` // allowlist for run script; absent = blocked
+
+	// BeforeState controls the before-state file that bulk writes save under
+	// --apply. nil means the default, which is on. StateDir is where they go
+	// (default ~/.local/state/zbxctl).
+	BeforeState *bool  `yaml:"before_state"`
+	StateDir    string `yaml:"state_dir"`
 }
+
+// SaveBeforeState reports whether before-state files should be written.
+func (c *Context) SaveBeforeState() bool { return c.BeforeState == nil || *c.BeforeState }
 
 // PermissionError is returned when the context lacks the required permission tier.
 type PermissionError struct {
@@ -144,6 +153,14 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	}
 	if v := os.Getenv("ZBXCTL_CA_FILE"); v != "" {
 		ctx.CAFile = v
+	}
+	if v := os.Getenv("ZBXCTL_BEFORE_STATE"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			ctx.BeforeState = &b
+		}
+	}
+	if v := os.Getenv("ZBXCTL_STATE_DIR"); v != "" {
+		ctx.StateDir = v
 	}
 
 	if ctx.DefaultLimit == 0 {

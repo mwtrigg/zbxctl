@@ -302,6 +302,7 @@ func runImport(noun string, args []string, dir string, isImport bool) error {
 			return cliFail(outFmt, err)
 		}
 	}
+	applyStateSettings(rootCmd, ctx)
 	files, err := importFiles(args, dir)
 	if err != nil {
 		return cliFail(outFmt, err)

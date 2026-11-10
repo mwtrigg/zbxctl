@@ -507,3 +507,31 @@ func TestEventVerbsAreSeparateCommands(t *testing.T) {
 		t.Fatalf("dry run of unacknowledge: %s", out)
 	}
 }
+
+func stateFiles(dir string) []string { f, _ := filepath.Glob(dir + "/*.json"); return f }
+
+func TestBeforeStateCanBeDisabledByEnvAndOverriddenByFlag(t *testing.T) {
+	defer resetBulkFlags()
+	// env var off: --apply writes no file
+	dir := t.TempDir()
+	t.Setenv("ZBXCTL_BEFORE_STATE", "false")
+	runCLI(t, "disable", "host", "web1", "--apply", "--state-dir", dir)
+	if lastErr != nil || len(stateFiles(dir)) != 0 {
+		t.Fatalf("ZBXCTL_BEFORE_STATE=false must skip the file: err=%v files=%v", lastErr, stateFiles(dir))
+	}
+	// an explicit --no-state=false wins over the env var
+	resetBulkFlags()
+	dir2 := t.TempDir()
+	runCLI(t, "disable", "host", "web1", "--apply", "--state-dir", dir2, "--no-state=false")
+	if lastErr != nil || len(stateFiles(dir2)) != 1 {
+		t.Fatalf("the flag must win: err=%v files=%v", lastErr, stateFiles(dir2))
+	}
+	// env var on (default): the file is written
+	resetBulkFlags()
+	t.Setenv("ZBXCTL_BEFORE_STATE", "true")
+	dir3 := t.TempDir()
+	runCLI(t, "disable", "host", "web1", "--apply", "--state-dir", dir3)
+	if lastErr != nil || len(stateFiles(dir3)) != 1 {
+		t.Fatalf("on by default: err=%v files=%v", lastErr, stateFiles(dir3))
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/config"
 	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
@@ -30,6 +31,23 @@ func addBulkFlags(cmd *cobra.Command) {
 	f.StringVar(&bulkStateDir, "state-dir", "", "where the before-state file is written (default ~/.local/state/zbxctl)")
 	f.BoolVar(&bulkNoState, "no-state", false, "do not write a before-state file")
 	f.BoolVar(&bulkNoVerify, "no-verify", false, "skip re-reading each target after the change")
+}
+
+// applyStateSettings merges the config file / environment settings for the
+// before-state file with the flags. Priority: flag > ZBXCTL_* env var > config
+// file > default (on, ~/.local/state/zbxctl).
+func applyStateSettings(cmd *cobra.Command, ctx *config.Context) {
+	if ctx == nil {
+		return
+	}
+	if f := cmd.Flags().Lookup("no-state"); f == nil || !f.Changed {
+		if !ctx.SaveBeforeState() {
+			bulkNoState = true
+		}
+	}
+	if bulkStateDir == "" && ctx.StateDir != "" {
+		bulkStateDir = ctx.StateDir
+	}
 }
 
 // step is one target of a write: resolved, described, ready to apply.
@@ -125,6 +143,7 @@ func runBulk(cmd *cobra.Command, args []string, spec bulkSpec) error {
 	if err := ctx.CheckPermission(spec.Tier); err != nil {
 		return cliFail(outFmt, err)
 	}
+	applyStateSettings(cmd, ctx)
 	targets, err := collectTargets(args)
 	if err != nil {
 		return cliFail(outFmt, err)
