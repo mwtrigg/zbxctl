@@ -30,7 +30,7 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 
 	cfg, ctx, err := config.LoadConfig(flagContext)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	// Apply --insecure flag.

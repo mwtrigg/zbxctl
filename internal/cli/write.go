@@ -74,10 +74,10 @@ func runDisableHost(cmd *cobra.Command, args []string) error {
 func runSetHostStatus(idOrName string, enable bool) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	h, err := resources.GetHost(c, idOrName)
@@ -86,7 +86,7 @@ func runSetHostStatus(idOrName string, enable bool) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	action := "disable"
@@ -107,7 +107,7 @@ func runSetHostStatus(idOrName string, enable bool) error {
 		err = resources.DisableHost(c, h.HostID)
 	}
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	return output.Print(outFmt, []output.Column{
@@ -150,10 +150,10 @@ func runDisableTrigger(cmd *cobra.Command, args []string) error {
 func runSetTriggerStatus(id string, enable bool) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	t, err := resources.GetTriggerByID(c, id)
@@ -162,7 +162,7 @@ func runSetTriggerStatus(id string, enable bool) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	action := "disable"
@@ -188,7 +188,7 @@ func runSetTriggerStatus(id string, enable bool) error {
 		err = resources.DisableTrigger(c, t.TriggerID)
 	}
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	return output.Print(outFmt, []output.Column{
@@ -226,10 +226,10 @@ func init() {
 func runAcknowledge(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	eventID := args[0]
@@ -249,7 +249,7 @@ func runAcknowledge(cmd *cobra.Command, args []string) error {
 		Close:   ackClose,
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	row := map[string]any{
@@ -301,25 +301,25 @@ func init() {
 func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	if maintCreateHost == "" && maintCreateGroup == "" {
-		return cliPrintErr(outFmt, "one of --host or --group is required", output.ExitError)
+		return cliPrintErr(outFmt, "one of --host or --group is required", output.ExitUsage)
 	}
 
 	startTS, err := parseTimestamp(maintCreateStart)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 	if startTS == 0 {
-		return cliPrintErr(outFmt, "--start is required", output.ExitError)
+		return cliPrintErr(outFmt, "--start is required", output.ExitUsage)
 	}
 	if maintCreateDuration <= 0 {
-		return cliPrintErr(outFmt, "--duration must be a positive number of minutes", output.ExitError)
+		return cliPrintErr(outFmt, "--duration must be a positive number of minutes", output.ExitUsage)
 	}
 	endTS := startTS + int64(maintCreateDuration)*60
 
@@ -337,7 +337,7 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		p.HostIDs = []string{hostID}
 	}
@@ -349,7 +349,7 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		p.GroupIDs = []string{g.GroupID}
 	}
@@ -365,7 +365,7 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 
 	id, err := resources.CreateMaintenance(c, p)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	return output.Print(outFmt, []output.Column{
@@ -395,10 +395,10 @@ var maintenanceDeleteCmd = &cobra.Command{
 func runMaintenanceDelete(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	m, err := resources.ResolveMaintenance(c, args[0])
@@ -407,7 +407,7 @@ func runMaintenanceDelete(cmd *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	if !confirm(fmt.Sprintf("delete maintenance %q (%s)?", m.Name, m.MaintenanceID)) {
@@ -416,7 +416,7 @@ func runMaintenanceDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := resources.DeleteMaintenance(c, m.MaintenanceID); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	return output.Print(outFmt, []output.Column{
@@ -447,14 +447,14 @@ func init() {
 func runMaintenanceList(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	maintenances, err := resources.GetMaintenances(c, resources.MaintenanceFilter{
 		Limit: effectiveLimit(maintenanceListLimit, ctx),
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -586,10 +586,10 @@ func init() {
 func runCreateHost(_ *cobra.Command, _ []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 	if err := ctx.CheckPermission("write"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	if flagCreateHostIP == "" && flagCreateHostDNS == "" {
@@ -608,7 +608,7 @@ func runCreateHost(_ *cobra.Command, _ []string) error {
 	ifaceTypeMap := map[string]int{"agent": 1, "snmp": 2, "ipmi": 3, "jmx": 4}
 	ifaceType, ok := ifaceTypeMap[flagCreateHostIfaceType]
 	if !ok {
-		return cliPrintErr(outFmt, "invalid --interface-type; use agent|snmp|ipmi|jmx", output.ExitError)
+		return cliPrintErr(outFmt, "invalid --interface-type; use agent|snmp|ipmi|jmx", output.ExitUsage)
 	}
 	useIP := 0
 	if flagCreateHostIP != "" {
@@ -638,7 +638,7 @@ func runCreateHost(_ *cobra.Command, _ []string) error {
 
 	host, err := resources.CreateHost(c, in)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	if outFmt == output.FormatTable {
@@ -656,10 +656,10 @@ func runCreateHost(_ *cobra.Command, _ []string) error {
 func runUpdateHost(_ *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 	if err := ctx.CheckPermission("write"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	if flagUpdateHostVisibleName == "" && flagUpdateHostDescription == "" &&
@@ -715,7 +715,7 @@ func runUpdateHost(_ *cobra.Command, args []string) error {
 
 	host, err := resources.UpdateHost(c, in)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	if outFmt == output.FormatTable {
@@ -733,10 +733,10 @@ func runUpdateHost(_ *cobra.Command, args []string) error {
 func runDeleteHost(_ *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 	if err := ctx.CheckPermission("write"); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	host, err := resources.GetHost(c, args[0])
@@ -751,7 +751,7 @@ func runDeleteHost(_ *cobra.Command, args []string) error {
 
 	_, err = resources.DeleteHost(c, host.HostID)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	if outFmt == output.FormatTable {
@@ -813,7 +813,7 @@ func init() {
 func runRunScript(_ *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 
 	// allowed_scripts check — independent of permission tier.
@@ -833,7 +833,7 @@ func runRunScript(_ *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	// Resolve script.
@@ -843,7 +843,7 @@ func runRunScript(_ *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	// Check against allowed_scripts allowlist (match on name or ID).
@@ -898,7 +898,7 @@ func runRunScript(_ *cobra.Command, args []string) error {
 	// Execute.
 	result, err := resources.RunScript(c, script.ScriptID, hostID)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	// Populate readable host/script name on result.

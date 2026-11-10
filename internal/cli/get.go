@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -46,9 +47,17 @@ func effectiveLimit(flagLimit int, ctx *config.Context) int {
 
 // parseTimestamp parses a Unix timestamp (integer string) or an RFC3339 /
 // YYYY-MM-DD date string into a Unix timestamp. Returns 0 on empty input.
+var relTimeRe = regexp.MustCompile(`^([0-9]+)([mhdw])$`)
+
 func parseTimestamp(s string) (int64, error) {
 	if s == "" {
 		return 0, nil
+	}
+	// Relative: 30m, 24h, 7d, 2w mean "that long ago".
+	if m := relTimeRe.FindStringSubmatch(s); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		unit := map[string]time.Duration{"m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour}[m[2]]
+		return time.Now().Add(-time.Duration(n) * unit).Unix(), nil
 	}
 	// Try plain integer first.
 	if n, err := strconv.ParseInt(s, 10, 64); err == nil {
@@ -62,7 +71,7 @@ func parseTimestamp(s string) (int64, error) {
 	if t, err := time.Parse("2006-01-02", s); err == nil {
 		return t.Unix(), nil
 	}
-	return 0, fmt.Errorf("cannot parse timestamp %q (accepted: unix integer, RFC3339, YYYY-MM-DD)", s)
+	return 0, &usageError{fmt.Sprintf("cannot parse timestamp %q (accepted: unix integer, RFC3339, YYYY-MM-DD, or relative like 30m, 24h, 7d)", s)}
 }
 
 // fmtUnix converts a Unix timestamp string to a short human-readable format.
@@ -75,7 +84,7 @@ func fmtUnix(s string) string {
 	if err != nil {
 		return s
 	}
-	return time.Unix(n, 0).UTC().Format("2006-01-02 15:04:05")
+	return time.Unix(n, 0).UTC().Format(time.RFC3339)
 }
 
 // hostStatusLabel converts a Zabbix status string to a human-readable label.
@@ -212,7 +221,7 @@ func init() {
 func runGetHosts(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	filter := resources.HostFilter{
@@ -230,7 +239,7 @@ func runGetHosts(cmd *cobra.Command, args []string) error {
 	case "":
 		// no filter
 	default:
-		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use monitored or unmonitored", getHostsStatus), output.ExitError)
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use monitored or unmonitored", getHostsStatus), output.ExitUsage)
 	}
 
 	// Resolve group name → ID if provided.
@@ -241,14 +250,14 @@ func runGetHosts(cmd *cobra.Command, args []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.GroupIDs = []string{g.GroupID}
 	}
 
 	hosts, err := resources.GetHosts(c, filter)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -291,7 +300,7 @@ func init() { getCmd.AddCommand(getHostCmd) }
 func runGetHost(cmd *cobra.Command, args []string) error {
 	c, outFmt, _, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	h, err := resources.GetHost(c, args[0])
@@ -300,7 +309,7 @@ func runGetHost(cmd *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -383,7 +392,7 @@ func init() {
 func runGetItems(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	hostID, err := resources.ResolveHostID(c, args[0])
@@ -392,7 +401,7 @@ func runGetItems(cmd *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	filter := resources.ItemFilter{
@@ -408,7 +417,7 @@ func runGetItems(cmd *cobra.Command, args []string) error {
 	case "":
 		// no filter
 	default:
-		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use enabled or disabled", getItemsStatus), output.ExitError)
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use enabled or disabled", getItemsStatus), output.ExitUsage)
 	}
 	switch getItemsState {
 	case "normal":
@@ -418,12 +427,12 @@ func runGetItems(cmd *cobra.Command, args []string) error {
 	case "":
 		// no filter
 	default:
-		return cliPrintErr(outFmt, fmt.Sprintf("invalid --state %q: use normal or unsupported", getItemsState), output.ExitError)
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --state %q: use normal or unsupported", getItemsState), output.ExitUsage)
 	}
 
 	items, err := resources.GetItems(c, filter)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -491,7 +500,7 @@ func init() {
 func runGetLatestData(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 
 	// Collect all host targets: positional arg + --host flags.
@@ -501,7 +510,7 @@ func runGetLatestData(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(hostTargets) == 0 && len(flagLatestdataGroups) == 0 {
-		return cliPrintErr(outFmt, "provide at least one host (positional or --host) or --group", output.ExitError)
+		return cliPrintErr(outFmt, "provide at least one host (positional or --host) or --group", output.ExitUsage)
 	}
 
 	var hostIDs []string
@@ -538,7 +547,7 @@ func runGetLatestData(cmd *cobra.Command, args []string) error {
 		WithHost:  true,
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -602,7 +611,7 @@ func init() {
 func runGetTriggers(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	filter := resources.TriggerFilter{
@@ -618,7 +627,7 @@ func runGetTriggers(cmd *cobra.Command, args []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.HostIDs = []string{id}
 	}
@@ -626,7 +635,7 @@ func runGetTriggers(cmd *cobra.Command, args []string) error {
 	if getTriggersSeverity != "" {
 		sev, err := parseSeverity(getTriggersSeverity)
 		if err != nil {
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.MinSeverity = sev
 	}
@@ -638,12 +647,12 @@ func runGetTriggers(cmd *cobra.Command, args []string) error {
 		filter.Status = "1"
 	case "":
 	default:
-		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use enabled or disabled", getTriggersStatus), output.ExitError)
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use enabled or disabled", getTriggersStatus), output.ExitUsage)
 	}
 
 	triggers, err := resources.GetTriggers(c, filter)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -709,7 +718,7 @@ func init() {
 func runGetProblems(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	filter := resources.ProblemFilter{
@@ -725,7 +734,7 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.HostIDs = []string{id}
 	}
@@ -733,7 +742,7 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 	if getProblemsSeverity != "" {
 		sev, err := parseSeverity(getProblemsSeverity)
 		if err != nil {
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		n, _ := strconv.Atoi(sev)
 		filter.MinSeverity = n
@@ -742,7 +751,7 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 	if getProblemsSince != "" {
 		ts, err := parseTimestamp(getProblemsSince)
 		if err != nil {
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.Since = ts
 	}
@@ -750,14 +759,14 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 	if getProblemsAcknowledged != "" {
 		b, err := strconv.ParseBool(getProblemsAcknowledged)
 		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("invalid --acknowledged %q: use true or false", getProblemsAcknowledged), output.ExitError)
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --acknowledged %q: use true or false", getProblemsAcknowledged), output.ExitUsage)
 		}
 		filter.Acknowledged = &b
 	}
 
 	problems, err := resources.GetProblems(c, filter)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -822,7 +831,7 @@ func init() {
 func runGetEvents(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	filter := resources.EventFilter{
@@ -836,7 +845,7 @@ func runGetEvents(cmd *cobra.Command, args []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.HostIDs = []string{id}
 	}
@@ -844,21 +853,21 @@ func runGetEvents(cmd *cobra.Command, args []string) error {
 	if getEventsSince != "" {
 		ts, err := parseTimestamp(getEventsSince)
 		if err != nil {
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.Since = ts
 	}
 	if getEventsUntil != "" {
 		ts, err := parseTimestamp(getEventsUntil)
 		if err != nil {
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		filter.Until = ts
 	}
 
 	events, err := resources.GetEvents(c, filter)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -915,7 +924,7 @@ func init() {
 func runGetTemplates(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	templates, err := resources.GetTemplates(c, resources.TemplateFilter{
@@ -923,7 +932,7 @@ func runGetTemplates(cmd *cobra.Command, args []string) error {
 		Limit:  effectiveLimit(getTemplatesLimit, ctx),
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -963,7 +972,7 @@ func init() { getCmd.AddCommand(getTemplateCmd) }
 func runGetTemplate(cmd *cobra.Command, args []string) error {
 	c, outFmt, _, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	t, err := resources.GetTemplate(c, args[0])
@@ -972,7 +981,7 @@ func runGetTemplate(cmd *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1014,14 +1023,14 @@ func init() {
 func runGetGroups(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	groups, err := resources.GetGroups(c, resources.GroupFilter{
 		Limit: effectiveLimit(getGroupsLimit, ctx),
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1056,14 +1065,14 @@ func init() {
 func runGetUsers(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	users, err := resources.GetUsers(c, resources.UserFilter{
 		Limit: effectiveLimit(getUsersLimit, ctx),
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1101,7 +1110,7 @@ func init() { getCmd.AddCommand(getUserCmd) }
 func runGetUser(cmd *cobra.Command, args []string) error {
 	c, outFmt, _, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	u, err := resources.GetUser(c, args[0])
@@ -1110,7 +1119,7 @@ func runGetUser(cmd *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1150,14 +1159,14 @@ func init() {
 func runGetUserGroups(cmd *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	groups, err := resources.GetUserGroups(c, resources.UserGroupFilter{
 		Limit: effectiveLimit(getUserGroupsLimit, ctx),
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1228,7 +1237,7 @@ func isNumericStr(s string) bool {
 func runGetHistory(_ *cobra.Command, _ []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 
 	if flagHistoryAroundEvent != "" {
@@ -1236,7 +1245,7 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 	}
 
 	if flagHistoryItem == "" {
-		return cliPrintErr(outFmt, "--item is required (or use --around-event)", output.ExitError)
+		return cliPrintErr(outFmt, "--item is required (or use --around-event)", output.ExitUsage)
 	}
 
 	// Non-numeric item key requires at least one host or group for resolution.
@@ -1307,7 +1316,7 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1354,7 +1363,7 @@ func runGetHistoryAroundEvent(c *api.Client, outFmt output.Format, ctx *config.C
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 	if info.HostID == "" {
 		return cliPrintErr(outFmt,
@@ -1373,7 +1382,7 @@ func runGetHistoryAroundEvent(c *api.Client, outFmt output.Format, ctx *config.C
 		Limit:     effectiveLimit(flagHistoryLimit, ctx),
 	})
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1453,7 +1462,7 @@ func init() {
 func runGetScripts(_ *cobra.Command, _ []string) error {
 	c, outFmt, _, err := newClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 
 	f := resources.ScriptFilter{}
@@ -1464,14 +1473,14 @@ func runGetScripts(_ *cobra.Command, _ []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		f.HostIDs = []string{id}
 	}
 
 	scripts, err := resources.GetScripts(c, f)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1526,14 +1535,14 @@ func init() {
 func runGetAlerts(_ *cobra.Command, _ []string) error {
 	c, outFmt, ctx, err := newClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 
 	switch getAlertsStatus {
 	case "sent", "failed", "":
 		// valid
 	default:
-		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use sent or failed", getAlertsStatus), output.ExitError)
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --status %q: use sent or failed", getAlertsStatus), output.ExitUsage)
 	}
 
 	f := resources.AlertFilter{
@@ -1548,7 +1557,7 @@ func runGetAlerts(_ *cobra.Command, _ []string) error {
 			if errors.As(err, &nfe) {
 				return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 			}
-			return cliPrintErr(outFmt, err.Error(), output.ExitError)
+			return cliFail(outFmt, err)
 		}
 		f.HostIDs = []string{id}
 	}
@@ -1565,7 +1574,7 @@ func runGetAlerts(_ *cobra.Command, _ []string) error {
 
 	alerts, err := resources.GetAlerts(c, f)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{
@@ -1611,7 +1620,7 @@ func init() { getCmd.AddCommand(getInterfacesCmd) }
 func runGetInterfaces(_ *cobra.Command, args []string) error {
 	c, outFmt, _, err := newClient()
 	if err != nil {
-		return cliPrintErr(output.Format(flagOutput), err.Error(), output.ExitError)
+		return cliFail(output.Format(flagOutput), err)
 	}
 
 	hostID, err := resources.ResolveHostID(c, args[0])
@@ -1620,7 +1629,7 @@ func runGetInterfaces(_ *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	ifaces, err := resources.GetInterfaces(c, hostID)
@@ -1629,7 +1638,7 @@ func runGetInterfaces(_ *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	cols := []output.Column{

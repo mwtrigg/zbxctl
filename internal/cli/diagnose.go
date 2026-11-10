@@ -40,7 +40,7 @@ func init() {
 func runDiagnoseHost(cmd *cobra.Command, args []string) error {
 	c, outFmt, _, err := newClient()
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	// Table is not usable for nested composite output.
@@ -56,12 +56,12 @@ func runDiagnoseHost(cmd *cobra.Command, args []string) error {
 		if errors.As(err, &nfe) {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	sinceDur, err := time.ParseDuration(diagSince)
 	if err != nil {
-		return cliPrintErr(outFmt, fmt.Sprintf("invalid --since %q: use Go duration e.g. 1h, 24h", diagSince), output.ExitError)
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --since %q: use Go duration e.g. 1h, 24h", diagSince), output.ExitUsage)
 	}
 	sinceTS := time.Now().Add(-sinceDur).Unix()
 
@@ -137,7 +137,7 @@ func runDiagnoseHost(cmd *cobra.Command, args []string) error {
 	})
 
 	if err := g.Wait(); err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	// Build interface availability for host section.
