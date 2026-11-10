@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="470" viewBox="0 0 880 470" role="img" aria-labelledby="t d">
+  <title id="t">zbxctl in a terminal</title>
+  <desc id="d">A dry run that shows what a change would do, then the same command with --apply, then a problem triage grouped by alert name.</desc>
+  <rect width="880" height="470" rx="12" fill="#0f1620"/>
+  <rect width="880" height="38" rx="12" fill="#1b2634"/>
+  <rect y="22" width="880" height="16" fill="#1b2634"/>
+  <circle cx="24" cy="19" r="6" fill="#ff5f56"/><circle cx="46" cy="19" r="6" fill="#ffbd2e"/><circle cx="68" cy="19" r="6" fill="#27c93f"/>
+  <text x="440" y="24" text-anchor="middle" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="13" fill="#8aa0b8">zbxctl</text>
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14">
+    <text x="24" y="70" fill="#7ee787">$ <tspan fill="#e6edf3">zbxctl disable host web-01</tspan></text>
+    <text x="24" y="94" fill="#8aa0b8">{"data":[{"applied":false,"dry_run":true,</text>
+    <text x="24" y="114" fill="#8aa0b8">  "would":"disable host \"web-01\" (web-01)"}]}</text>
+    <text x="24" y="150" fill="#7ee787">$ <tspan fill="#e6edf3">zbxctl disable host web-01 --apply</tspan></text>
+    <text x="24" y="174" fill="#6b7f94">before-state saved: ~/.local/state/zbxctl/disable-host-20261110T…json</text>
+    <text x="24" y="196" fill="#8aa0b8">{"host":"web-01","status":"unmonitored","verified":true}</text>
+    <text x="24" y="232" fill="#7ee787">$ <tspan fill="#e6edf3">zbxctl get problems --group-by name --exclude-orphans -o table</tspan></text>
+    <text x="24" y="258" fill="#c9d4e0" font-weight="bold">COUNT  SEVERITY  NAME                                    HOSTS</text>
+    <text x="24" y="282" fill="#8aa0b8">    5  <tspan fill="#ffa657">average</tspan>   Agent heartbeat missing on &lt;host&gt;       web-02, web-03, db-01, …</text>
+    <text x="24" y="304" fill="#8aa0b8">    2  <tspan fill="#e3b341">warning</tspan>   /boot: free space is low on &lt;host&gt;      app-01, app-02</text>
+    <text x="24" y="340" fill="#7ee787">$ <tspan fill="#e6edf3">zbxctl diagnose trigger 4711</tspan></text>
+    <text x="24" y="364" fill="#8aa0b8">"reasons": ["manual close is off for this trigger: the problem can only be</text>
+    <text x="24" y="384" fill="#8aa0b8">             closed by recovering, or by enabling manual close"]</text>
+    <text x="24" y="420" fill="#7ee787">$ <tspan fill="#e6edf3">zbxctl backtest --item system.cpu.util --when 'avg(5m)&gt;90' --summary</tspan></text>
+    <text x="24" y="444" fill="#8aa0b8">host   fires  true  false  missed  median_lead_minutes</text>
+  </g>
+</svg>
