@@ -206,7 +206,7 @@ func runAuthCheck(cmd *cobra.Command, args []string) error {
 func runAuthStatus(cmd *cobra.Command, args []string) error {
 	outFmt := output.Format(flagOutput)
 
-	cfg, ctx, err := config.LoadConfig(flagContext)
+	_, ctx, err := config.LoadConfig(flagContext)
 	if err != nil {
 		return cliFail(outFmt, err)
 	}
@@ -222,11 +222,9 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		authVia = "password"
 	}
 
-	// Resolve active context name for display.
-	ctxName := cfg.CurrentContext
-	if flagContext != "" {
-		ctxName = flagContext
-	}
+	// The context in use, by the same rules every command follows (flag, ZBXCTL_CONTEXT, then
+	// current_context): the MCP server pins its context through ZBXCTL_CONTEXT.
+	ctxName, _ := config.ActiveContextName(flagContext)
 
 	connected := false
 	apiVersion := ""

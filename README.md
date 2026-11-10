@@ -77,9 +77,16 @@ and call the Zabbix API with the same token. So:
 
 - **Real enforcement is the Zabbix side**: the role and the user group rights of the user the token
   belongs to. Zabbix refuses what that user may not do, whatever client asks.
-- **Give agents their own token**, of a user with the **User** role whose user groups have **read-only**
-  access to the host groups it should see. Keep Admin and Super admin tokens out of any context an agent can
-  use. In the config, label that context `permissions: readonly`.
+- **Give agents their own token**, of a user with a **custom User-type role** and user groups that have
+  **read-only** access to the host groups it should see. A stock User role is not read-only: it can still
+  execute scripts and act on problems (acknowledge, close, suppress, change severity, comment). So make the role
+  turn off *Execute scripts* and the problem actions under "Access to actions", and set "Access to API" to an
+  **allow list** of the read methods (`*.get`, plus `apiinfo.version` and `user.checkAuthentication`). The API
+  allow list is what makes a token read-only at the method level. Keep Admin and Super admin tokens out of any
+  context an agent can use. In the config, label that context `permissions: readonly`.
+- **A write-capable agent token** (for `--allow-writes`) should deny what it does not need in its role's API
+  rules: at least `script.*`, `user.*`, `token.*`, `item.create` and `configuration.import`, since an item with
+  a `system.run[...]` key or an imported template runs commands on the monitored hosts.
 - **`zbxctl auth check`** reads the token's role and its rules (it changes nothing) and exits 8, with the
   reasons, when the tier you declared is stronger than what Zabbix enforces: for a `readonly` tier, a role that
   can change the configuration (Admin, Super admin), run scripts, acknowledge, close, suppress or comment on
@@ -87,7 +94,8 @@ and call the Zabbix API with the same token. So:
 
 | Zabbix role of the token's user | What Zabbix lets it do | Matching zbxctl tier |
 |---|---|---|
-| **User**, groups with read-only rights | read what those groups hold; acknowledge, suppress and comment on problems if the role allows it; no configuration changes | `readonly` (or `operator` if it should acknowledge) |
+| **User** (custom role: no script execution, no problem actions, API allow list `*.get`), groups with read-only rights | read what those groups hold; no changes of any kind | `readonly` |
+| **User** (stock role), groups with read-only rights | read what those groups hold; **execute scripts and acknowledge, close, suppress or comment on problems** (the stock role allows these); no configuration changes | `operator` (not `readonly`) |
 | **User**, groups with read-write rights | the above, and change the objects of those groups only where the role allows | `operator` |
 | **Admin** | change the configuration of the groups it has read-write rights to (hosts, items, triggers, templates it can reach), not users or global settings | `write` |
 | **Super admin** | everything, including users, tokens, scripts and settings | `write`, with care |
@@ -178,7 +186,7 @@ update host --proxy <name|none> | --proxy-group <name> | --add-template | --remo
 export | diff | import   template | host
 delete template | delete lost items | delete lost triggers
 run script <name> --host <host>        (pinned allowlist, operator tier and a typed code; see the note on what that does and does not stop)
-api call <method> --params '{...}'     (escape hatch: reads run with secrets masked; writes are a dry run, and user/token/script/action/role/usergroup/authentication/userdirectory/mediatype writes need api_call_admin: true)
+api call <method> --params '{...}'     (escape hatch: reads run with secrets masked; writes are a dry run unless `--apply` or `mode: apply`, and writes to these families need `api_call_admin: true`: user, token, script, action, role, usergroup, authentication, userdirectory, mediatype, configuration (import), connector, settings, mfa, housekeeping, proxy, proxygroup, module, item, itemprototype, discoveryrule: true)
 ```
 
 Handy flags on list commands: `--filter KEY=VALUE`, `--field NAME` (one value per line, for shell use), `-o json|jsonl|table|csv`, `--since 7d` (relative times work everywhere), `--tz America/New_York`.
@@ -263,7 +271,7 @@ contexts:
     mode: dry-run                   # dry-run (default) or apply: what a change does without --apply/--dry-run
     permissions: write              # readonly | operator | write
     allowed_scripts: []             # what `run script` may execute, as name@sha256:<hash of the definition>; empty = blocked (a refusal prints the entry to add)
-    api_call_admin: false           # true lets `api call` write user, token, script, action, role... objects
+    api_call_admin: false           # true lets `api call` write the admin-class families (user, token, script, action, role, configuration.import, connector, settings, item, proxy, ...) and create items with system.run keys
     before_state: true              # audit files for changes made with --apply
     state_dir: ""                   # empty = ~/.local/state/zbxctl
     state_keep: 200                 # keep this many audit files, delete older ones; 0 = keep all

@@ -14,7 +14,7 @@ contexts:
     mode: dry-run           # dry-run (default): changes only show what they would do; apply: they happen (--dry-run previews)
     permissions: write      # readonly | operator | write (default readonly: without it changes are refused)
     allowed_scripts: []     # `run script` entries: name@sha256:<hash of the script's definition>; empty = blocked. Not a barrier against a program running as you: leave it empty on contexts an agent can use
-    # api_call_admin: false # true lets `api call` write user, token, script, action, role... objects
+    # api_call_admin: false # true lets `api call` write the admin-class families (user, token, script, action, role, configuration.import, connector, settings, item, proxy, ...) and create items with system.run keys
     before_state: true      # save a before-state file for bulk writes under --apply (default true)
     state_dir: ""           # where they go; empty = ~/.local/state/zbxctl
     state_keep: 200         # keep this many, delete older ones as new are written; 0 = keep all

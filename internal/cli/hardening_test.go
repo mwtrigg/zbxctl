@@ -703,3 +703,13 @@ func TestRunStopsWhenTheStateFileCanNoLongerBeUpdated(t *testing.T) {
 		t.Fatalf("it must stop after the first target, not apply all three (applied %d)", n)
 	}
 }
+
+// R3-9: auth status reports the context in use under ZBXCTL_CONTEXT, which is how the MCP
+// server pins it.
+func TestAuthStatusReportsTheContextInUse(t *testing.T) {
+	f := &fakeZabbix{Context: "permissions: readonly"}
+	out, err := runFake(t, f, "auth", "status")
+	if err != nil || !strings.Contains(out, `"context": "t"`) {
+		t.Fatalf("auth status must name the active context: %v\n%s", err, out)
+	}
+}

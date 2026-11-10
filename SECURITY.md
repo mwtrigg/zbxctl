@@ -27,7 +27,7 @@ mistakes**, not a boundary against code that runs as the same user: that code ca
 token directly (or read the config file and the state directory). Real enforcement is the Zabbix side, the
 role and user group rights of the token's user. Recommended:
 
-- a separate token per use, and for agents the **User** role with read-only group rights;
+- a separate token per use, and for agents a custom **User-type role** (script execution and problem actions off, API access an allow list of the `*.get` methods) with read-only group rights; a stock User role can still run scripts and act on problems;
 - `permissions: readonly` (the default when nothing is set) on contexts an agent uses, and
   `zbxctl auth check` to see whether that tier is stronger than what the token's role and its rules enforce (it exits 8 when it is);
 - no `allowed_scripts` and no `api_call_admin` on contexts an agent can use;
