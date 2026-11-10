@@ -4,11 +4,12 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 zbxctl is `0.x`: the command line and JSON shapes can still change between releases while support for newer
 Zabbix versions (8.x) is worked out.
 
-Nothing has been released yet, so everything below is under Unreleased. The first release is `v0.1.0-rc.1`; the
-release notes are taken from this file (`scripts/release-notes.sh`), and the Unreleased heading becomes a version
-heading when a release is cut.
+0.1.0 is the first release. `v0.1.0-rc.1` was its release candidate; the release notes are taken from this
+file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-11-10
 
 ### Added
 - Reads for hosts, items, triggers, problems, events, history, trends, templates, groups, users, proxies,
