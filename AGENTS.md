@@ -11,7 +11,7 @@ Go CLI for Zabbix 7.x. Read `README.md` for the user-facing contract; this file 
 ## Layout
 
 - `cmd/zbxctl`: entry point.
-- `internal/cli`: cobra commands. `get.go`, `get_more.go`, `history_extra.go`, `discovery.go` (reads), `write.go`, `tag.go`, `userwrite.go`, `groupwrite.go`, `macrowrite.go`, `itemtriggerwrite.go`, `apicall.go`, `configcmd.go` (writes and export/import), `bulk.go` + `bulkcmds.go` (the shared bulk-write flow: resolve all targets, `--expect`, before-state file, verify), `diagnose.go`, `backtest.go`, `llm.go` (the command manifest, keep it in sync when flags change), `root.go` (global flags, error classification).
+- `internal/cli`: cobra commands. `get.go`, `get_more.go`, `history_extra.go`, `discovery.go` (reads), `write.go`, `tag.go`, `userwrite.go`, `groupwrite.go`, `macrowrite.go`, `itemtriggerwrite.go`, `apicall.go`, `state.go` (list/show/prune of before-state files), `configcmd.go` (writes and export/import), `bulk.go` + `bulkcmds.go` (the shared bulk-write flow: resolve all targets, `--expect`, before-state file, verify), `diagnose.go`, `backtest.go`, `llm.go` (the command manifest, keep it in sync when flags change), `root.go` (global flags, error classification).
 - `internal/api`: JSON-RPC client (Bearer token auth). `internal/api/resources`: one file per Zabbix object.
 - `internal/backtest`: the pure condition parser/evaluator behind `backtest` (no API access, unit-tested).
 - `internal/output`: json/jsonl/table printing, raw-field stripping, error printing.

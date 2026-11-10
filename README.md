@@ -39,6 +39,18 @@ Before-state files (see below) can be turned off per context with `before_state:
 
 `permissions` caps what a context may do: `readonly` blocks all writes, `operator` allows enable/disable/acknowledge/maintenance, `write` allows everything. `run script` additionally needs the script listed in the context's `allowed_scripts` and a one-time confirmation token.
 
+## The audit trail: before-state files
+
+Every change made with `--apply` saves a before-state file: for each target, what was done and what the target looked like before. Together they are an audit trail of what zbxctl changed. Turn this off with `before_state: false` in the config (per context), `ZBXCTL_BEFORE_STATE=false`, or `--no-state`; `state_dir` / `ZBXCTL_STATE_DIR` / `--state-dir` choose the directory (default `~/.local/state/zbxctl`).
+
+```
+zbxctl state list [--command delete-host] [--older-than 30d]   # newest first
+zbxctl state show <file>                                       # what one file recorded
+zbxctl state prune --older-than 90d [--apply]                  # a dry run until --apply
+```
+
+Nothing is deleted automatically, and `state prune` only ever touches files zbxctl wrote. These commands read local files and need no Zabbix connection.
+
 ## Escape hatch
 
 `zbxctl api call <method> --params '{...}'` calls any Zabbix API method and prints the raw result, for the long tail that has no command. Reads (`*.get`, `configuration.export`, ...) run directly; every other method is a dry run until `--apply`, needs the write tier and saves an audit record with secrets masked. `user.login`, `token.generate`, `script.execute` and similar are refused. Prefer a dedicated command whenever one exists: it gives flat results, dry runs and checks.
