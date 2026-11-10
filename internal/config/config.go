@@ -31,6 +31,10 @@ type Context struct {
 	// BeforeState controls the before-state file that bulk writes save under
 	// --apply. nil means the default, which is on. StateDir is where they go
 	// (default ~/.local/state/zbxctl).
+	// APIVersion pins the Zabbix version this context talks to, e.g. "7.4" or
+	// "8.0". Empty means detect it from the server.
+	APIVersion string `yaml:"api_version"`
+
 	BeforeState *bool  `yaml:"before_state"`
 	StateDir    string `yaml:"state_dir"`
 }
@@ -153,6 +157,9 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	}
 	if v := os.Getenv("ZBXCTL_CA_FILE"); v != "" {
 		ctx.CAFile = v
+	}
+	if v := os.Getenv("ZBXCTL_API_VERSION"); v != "" {
+		ctx.APIVersion = v
 	}
 	if v := os.Getenv("ZBXCTL_BEFORE_STATE"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {

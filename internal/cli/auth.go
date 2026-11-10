@@ -67,14 +67,23 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		{Key: "auth_via", Header: "AUTH_VIA"},
 		{Key: "connected", Header: "CONNECTED"},
 		{Key: "api_version", Header: "API_VERSION"},
+		{Key: "supported", Header: "SUPPORTED"},
 	}
 
 	row := map[string]any{
-		"url":         ctx.URL,
-		"context":     ctxName,
-		"auth_via":    authVia,
-		"connected":   connected,
-		"api_version": apiVersion,
+		"url":            ctx.URL,
+		"context":        ctxName,
+		"auth_via":       authVia,
+		"connected":      connected,
+		"api_version":    apiVersion,
+		"pinned_version": ctx.APIVersion,
+		"tested_with":    api.Tested.String(),
+		"minimum":        api.MinSupported.String(),
+	}
+	if v, err := api.ParseVersion(apiVersion); err == nil {
+		newer, cerr := v.Check()
+		row["supported"] = cerr == nil
+		row["newer_than_tested"] = newer
 	}
 
 	return output.Print(outFmt, cols, []map[string]any{row})

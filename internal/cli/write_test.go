@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,9 @@ import (
 
 	"github.com/mwtrigg/zbxctl/internal/output"
 )
+
+// serverVersion, when set, is what the fake server reports for apiinfo.version.
+var serverVersion string
 
 // extraResults overrides the fake server answer for a method in the next runCLI.
 var extraResults map[string]string
@@ -38,6 +42,9 @@ func runCLI(t *testing.T, args ...string) (string, []string) {
 		res := "[]"
 		if r, ok := extraResults[req.Method]; ok {
 			res = r
+		}
+		if req.Method == "apiinfo.version" && serverVersion != "" {
+			res = `"` + serverVersion + `"`
 		}
 		switch req.Method {
 		case "host.get":
@@ -622,4 +629,59 @@ func TestStateDirComesFromEnvWhenNoFlag(t *testing.T) {
 	if !strings.Contains(out, "a.json") {
 		t.Fatalf("ZBXCTL_STATE_DIR not used: %q", out)
 	}
+}
+
+func TestOldServersAreRefusedAndNewOnesWarned(t *testing.T) {
+	defer func() { serverVersion = ""; flagAllowUnsupported = false; versionWarned = false }()
+	serverVersion = "7.0.5"
+	_, methods := runCLI(t, "get", "hosts")
+	if lastErr == nil || exitCodeOf(lastErr) != output.ExitVersion || slices.Contains(methods, "host.get") {
+		t.Fatalf("a 7.0 server must be refused before any other call: err=%v methods=%v", lastErr, methods)
+	}
+	flagAllowUnsupported = true
+	_, methods = runCLI(t, "get", "hosts", "--allow-unsupported")
+	flagAllowUnsupported = false
+	if lastErr != nil || !slices.Contains(methods, "host.get") {
+		t.Fatalf("--allow-unsupported must let it through: err=%v", lastErr)
+	}
+	serverVersion = "8.0.1"
+	_, methods = runCLI(t, "get", "hosts")
+	if lastErr != nil || !slices.Contains(methods, "host.get") {
+		t.Fatalf("a newer server works (with a warning): err=%v", lastErr)
+	}
+	serverVersion = "7.4.16"
+	_, methods = runCLI(t, "get", "hosts")
+	if lastErr != nil || !slices.Contains(methods, "host.get") {
+		t.Fatalf("7.4 is supported: err=%v", lastErr)
+	}
+}
+
+func TestPinnedVersionSkipsDetectionAndEnvOverrides(t *testing.T) {
+	defer func() { serverVersion = ""; versionWarned = false }()
+	serverVersion = "7.4.16"
+	t.Setenv("ZBXCTL_API_VERSION", "8.0")
+	_, methods := runCLI(t, "get", "hosts")
+	if lastErr != nil || slices.Contains(methods, "apiinfo.version") || !slices.Contains(methods, "host.get") {
+		t.Fatalf("a pinned version must not ask the server: err=%v methods=%v", lastErr, methods)
+	}
+	t.Setenv("ZBXCTL_API_VERSION", "6.0")
+	_, methods = runCLI(t, "get", "hosts")
+	if lastErr == nil || exitCodeOf(lastErr) != output.ExitVersion {
+		t.Fatalf("a pin below 7.4 is refused too: err=%v", lastErr)
+	}
+	t.Setenv("ZBXCTL_API_VERSION", "banana")
+	_, _ = runCLI(t, "get", "hosts")
+	if lastErr == nil {
+		t.Fatal("an unreadable pin must be an error")
+	}
+}
+
+// exitCodeOf is the exit code a command error ends in: commands print their own
+// structured error and return a cliErr carrying the code.
+func exitCodeOf(err error) int {
+	var ce *cliErr
+	if errors.As(err, &ce) {
+		return ce.code
+	}
+	return classify(err)
 }

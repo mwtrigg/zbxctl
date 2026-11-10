@@ -20,6 +20,7 @@ const (
 	ExitAuthError = 3
 	ExitConnect   = 4 // cannot reach Zabbix
 	ExitUsage     = 5 // invalid arguments or flags
+	ExitVersion   = 6 // the Zabbix server is older than zbxctl supports
 )
 
 // Raw includes the raw API values (*_raw, *_unix) next to the readable ones.
@@ -43,6 +44,8 @@ func KindFor(code int) string {
 		return "connection"
 	case ExitUsage:
 		return "usage"
+	case ExitVersion:
+		return "unsupported_version"
 	default:
 		return "error"
 	}
