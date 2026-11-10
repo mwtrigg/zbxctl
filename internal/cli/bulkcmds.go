@@ -182,6 +182,52 @@ func maintenanceDeleteSpec() bulkSpec {
 	}
 }
 
+// maintenanceEndSpec extends or shortens one-time maintenance windows. Either
+// by a duration (delta) or to an absolute end time (until).
+func maintenanceEndSpec(verb string, by time.Duration, until int64) bulkSpec {
+	return bulkSpec{
+		Name: "maintenance-" + verb, Tier: "operator",
+		Cols: []output.Column{{Key: "maintenanceid", Header: "MAINTENANCE_ID"}, {Key: "name", Header: "NAME"}, {Key: "active_till", Header: "NEW_END"}},
+		Prepare: func(c *api.Client, target string) (*step, error) {
+			m, err := resources.ResolveMaintenance(c, target)
+			if err != nil {
+				return nil, err
+			}
+			oldTill, _ := strconv.ParseInt(m.ActiveTill, 10, 64)
+			newTill := until
+			if newTill == 0 {
+				switch verb {
+				case "extend":
+					newTill = oldTill + int64(by.Seconds())
+				default:
+					newTill = oldTill - int64(by.Seconds())
+				}
+			}
+			if newTill == oldTill {
+				return nil, &usageError{fmt.Sprintf("maintenance %q already ends at %s", m.Name, fmtUnix(m.ActiveTill))}
+			}
+			newLabel := fmtUnix(strconv.FormatInt(newTill, 10))
+			return &step{
+				Key:    m.MaintenanceID,
+				Desc:   fmt.Sprintf("%s maintenance %q from %s to %s", verb, m.Name, fmtUnix(m.ActiveTill), newLabel),
+				Before: map[string]any{"maintenanceid": m.MaintenanceID, "name": m.Name, "active_since": fmtUnix(m.ActiveSince), "active_till": fmtUnix(m.ActiveTill), "hosts": m.HostNames(), "groups": m.GroupNames()},
+				Apply:  func() error { return resources.SetMaintenanceEnd(c, m, newTill) },
+				Verify: func() error {
+					now, err := resources.ResolveMaintenance(c, m.MaintenanceID)
+					if err != nil {
+						return err
+					}
+					if now.ActiveTill != strconv.FormatInt(newTill, 10) {
+						return fmt.Errorf("end is %s, expected %s", fmtUnix(now.ActiveTill), newLabel)
+					}
+					return nil
+				},
+				Row: map[string]any{"maintenanceid": m.MaintenanceID, "name": m.Name, "active_till": newLabel, "previous_end": fmtUnix(m.ActiveTill)},
+			}, nil
+		},
+	}
+}
+
 // ackSpec builds the acknowledge flow from the validated flags in p.
 func ackSpec(p resources.AcknowledgeParams, verb string) bulkSpec {
 	return bulkSpec{
@@ -271,7 +317,7 @@ func init() {
 		{Name: "no-state", Type: "bool", Description: "Do not write a before-state file.", Default: false},
 		{Name: "no-verify", Type: "bool", Description: "Skip re-reading each target after the change.", Default: false},
 	}
-	bulk := map[string]bool{"enable host": true, "disable host": true, "enable trigger": true, "disable trigger": true, "acknowledge": true, "maintenance delete": true, "delete host": true}
+	bulk := map[string]bool{"enable host": true, "disable host": true, "enable trigger": true, "disable trigger": true, "acknowledge": true, "maintenance delete": true, "maintenance extend": true, "maintenance shorten": true, "delete host": true}
 	for i := range capabilities {
 		if bulk[capabilities[i].Command] {
 			capabilities[i].Flags = append(capabilities[i].Flags, extra...)
