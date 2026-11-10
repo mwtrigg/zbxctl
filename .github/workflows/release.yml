@@ -1,21 +1,31 @@
 name: Release
 
 # Push a tag like v0.1.0 to build and publish a release.
+#
+# The release is signed: checksums.txt is signed with the ZBXCTL_SIGNING_KEY
+# secret (an ed25519 SSH key) into checksums.txt.sig, which `zbxctl upgrade`
+# verifies against the public key compiled into the binary. Once the repository
+# is public the archives and checksums also get build-provenance attestations,
+# checkable with `gh attestation verify`.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write       # publish the release
+      id-token: write       # attestations
+      attestations: write   # attestations
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       - name: Test before releasing
@@ -23,10 +33,29 @@ jobs:
           go vet ./...
           go test ./...
           go run scripts/notices/main.go | diff -u THIRD_PARTY_NOTICES.md -
-      - uses: anchore/sbom-action/download-syft@v0
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+      - name: Put the signing key in place
+        env:
+          ZBXCTL_SIGNING_KEY: ${{ secrets.ZBXCTL_SIGNING_KEY }}
+        run: |
+          if [ -z "$ZBXCTL_SIGNING_KEY" ]; then echo "the ZBXCTL_SIGNING_KEY secret is not set"; exit 1; fi
+          umask 077
+          printf '%s\n' "$ZBXCTL_SIGNING_KEY" > "$RUNNER_TEMP/zbxctl_signing_key"
+          echo "ZBXCTL_SIGNING_KEY_FILE=$RUNNER_TEMP/zbxctl_signing_key" >> "$GITHUB_ENV"
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/zbxctl_signing_key"
+      - name: Attest build provenance (public repositories)
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
