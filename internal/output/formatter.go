@@ -253,7 +253,7 @@ func cell(v any) any {
 func Printable(s string) string {
 	clean := true
 	for _, r := range s {
-		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+		if unsafeRune(r) {
 			clean = false
 			break
 		}
@@ -263,13 +263,36 @@ func Printable(s string) string {
 	}
 	var b strings.Builder
 	for _, r := range s {
-		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r < 0xa0) {
-			fmt.Fprintf(&b, "\\x%02x", r)
-		} else {
+		switch {
+		case !unsafeRune(r):
 			b.WriteRune(r)
+		case r < 0x100:
+			fmt.Fprintf(&b, "\\x%02x", r)
+		default:
+			fmt.Fprintf(&b, "\\u%04x", r)
 		}
 	}
 	return b.String()
+}
+
+// unsafeRune reports characters that change how surrounding text is displayed or that
+// are invisible: C0 and C1 controls (except newline and tab), and the Unicode format
+// characters that reorder text (bidi marks, embeddings, overrides and isolates), join or
+// break it invisibly (zero-width space, joiners, word joiner, BOM) or end a line (U+2028/9).
+func unsafeRune(r rune) bool {
+	switch {
+	case r < 0x20:
+		return r != '\n' && r != '\t'
+	case r == 0x7f, r >= 0x80 && r < 0xa0:
+		return true
+	case r >= 0x200b && r <= 0x200f, // zero-width space/joiners, LRM, RLM
+		r >= 0x2028 && r <= 0x202e, // line/paragraph separators, bidi embeddings and overrides
+		r >= 0x2060 && r <= 0x2064, // word joiner and invisible operators
+		r >= 0x2066 && r <= 0x2069, // bidi isolates
+		r == 0xfeff, r == 0x061c, r == 0x180e:
+		return true
+	}
+	return false
 }
 
 func safeCell(v any) any {

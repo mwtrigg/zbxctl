@@ -9,6 +9,14 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+### Fixed
+- `update host` prints the host as it is after the change (it showed the old visible name after `--visible-name`).
+- zbxctl refuses to keep before-state files in a directory that another user owns or that other users can write to
+  (they could delete or replace the records); the directory zbxctl creates itself is private and passes. A symlink is
+  judged by its target.
+- Table output also escapes bidirectional-text controls and invisible characters (right-to-left override, isolates,
+  zero-width space and joiners, byte order mark, line and paragraph separators), not only control characters.
+
 ## [0.1.0] - 2026-11-10
 
 ### Added

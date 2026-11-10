@@ -199,6 +199,13 @@ func runUpdateHost(cmd *cobra.Command, args []string) error {
 					return nil
 				},
 				Row: map[string]any{"hostid": h.HostID, "host": h.Host, "name": h.Name, "status": hostStatusLabel(h.Status)},
+				RowAfter: func() map[string]any { // the host as it is now, so --visible-name shows the new name
+					now, err := resources.GetHostByID(c, h.HostID)
+					if err != nil {
+						return nil
+					}
+					return map[string]any{"hostid": now.HostID, "host": now.Host, "name": now.Name, "status": hostStatusLabel(now.Status)}
+				},
 			}, nil
 		},
 	})

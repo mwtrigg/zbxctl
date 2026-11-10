@@ -78,6 +78,9 @@ type step struct {
 	Proves      bool
 	VerifyAfter time.Duration
 	Row         map[string]any // result row after a successful apply
+	// RowAfter, when set, builds the result row from the target as it is after the change
+	// (so the row shows the new values, not the ones read before); nil means use Row.
+	RowAfter func() map[string]any
 }
 
 type bulkSpec struct {
@@ -142,7 +145,10 @@ func stateDir() (string, error) {
 			return "", err
 		}
 	}
-	return dir, os.MkdirAll(dir, 0o700)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, checkStateDir(dir)
 }
 
 // createStateFile reserves a new, empty before-state file. The name carries the
@@ -433,7 +439,13 @@ func runSteps(outFmt output.Format, name string, specCols []output.Column, steps
 	}
 	for _, s := range applied {
 		row := map[string]any{}
-		for k, v := range s.Row {
+		src := s.Row
+		if s.RowAfter != nil {
+			if r := s.RowAfter(); r != nil {
+				src = r
+			}
+		}
+		for k, v := range src {
 			row[k] = v
 		}
 		if !bulkNoVerify && s.Verify != nil {

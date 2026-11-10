@@ -448,3 +448,23 @@ func TestARefusedFirstImportFileRemovesTheRecord(t *testing.T) {
 		t.Fatalf("Zabbix refused the first file, so there is nothing to undo: %v", got)
 	}
 }
+
+// The result row of update host shows the host after the change, not before it.
+func TestUpdateHostResultRowShowsTheNewName(t *testing.T) {
+	name := "Old name"
+	f := &fakeZabbix{}
+	f.Handler = func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "host.update":
+			name = "New name"
+			return fakeReply{Result: `{"hostids":["10"]}`}
+		case "host.get":
+			return fakeReply{Result: hostJSON(name, "d", "0", "0")}
+		}
+		return fakeReply{}
+	}
+	out, err := runFake(t, f, "update", "host", "web1", "--visible-name", "New name", "--apply")
+	if err != nil || !strings.Contains(out, `"name": "New name"`) || strings.Contains(out, "Old name") {
+		t.Fatalf("the result row must show the new name: %v\n%s", err, out)
+	}
+}

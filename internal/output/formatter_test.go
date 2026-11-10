@@ -39,3 +39,26 @@ func TestPrintableMakesControlCharactersVisible(t *testing.T) {
 		t.Fatalf("escapes must be shown: %q", got)
 	}
 }
+
+func TestPrintableEscapesBidiAndInvisibleCharacters(t *testing.T) {
+	for name, in := range map[string]string{
+		"right-to-left override": "ok\u202egnp.exe",
+		"isolate":                "a\u2066b\u2069",
+		"zero-width space":       "pay\u200bpal",
+		"zero-width joiner":      "a\u200db",
+		"byte order mark":        "\ufeffhost",
+		"line separator":         "a\u2028b",
+		"left-to-right mark":     "a\u200eb",
+	} {
+		got := Printable(in)
+		if got == in || strings.ContainsAny(got, "\u202e\u2066\u2069\u200b\u200d\ufeff\u2028\u200e") {
+			t.Errorf("%s: invisible or reordering characters must be shown as escapes: %q", name, got)
+		}
+		if !strings.Contains(got, `\u`) {
+			t.Errorf("%s: want a visible \\uXXXX escape: %q", name, got)
+		}
+	}
+	if got := Printable("café — ünïcode 日本語 ok"); got != "café — ünïcode 日本語 ok" {
+		t.Errorf("ordinary text, accents and other scripts stay as they are: %q", got)
+	}
+}
