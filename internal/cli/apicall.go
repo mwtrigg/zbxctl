@@ -37,6 +37,12 @@ var apiDenied = map[string]string{
 var apiAdminFamilies = map[string]bool{
 	"user": true, "token": true, "script": true, "action": true, "role": true, "usergroup": true,
 	"authentication": true, "userdirectory": true, "mediatype": true,
+	// More that reach as far: configuration.import (can create media types and items with
+	// system.run keys), connector (streams data to any URL), settings, mfa and housekeeping
+	// (security and retention settings), proxy and module (what talks to Zabbix and what
+	// code it loads), and items, item prototypes and discovery rules (system.run keys).
+	"configuration": true, "connector": true, "settings": true, "mfa": true, "housekeeping": true,
+	"proxy": true, "proxygroup": true, "module": true, "item": true, "itemprototype": true, "discoveryrule": true,
 }
 
 // isReadMethod reports methods that only read.

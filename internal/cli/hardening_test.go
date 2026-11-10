@@ -452,3 +452,61 @@ func TestChildRefusesCommandsTheServerNeverOffers(t *testing.T) {
 		t.Errorf("version stays allowed: %v", err)
 	}
 }
+
+// Finding N2 (security): the server resolves its context once; a later `context use`
+// elsewhere must not move it.
+func TestMCPPinsTheContextForEveryChild(t *testing.T) {
+	old := mcpPinnedContext
+	defer func() { mcpPinnedContext = old }()
+	mcpPinnedContext = "lab"
+	t.Setenv("ZBXCTL_CONTEXT", "prod") // what a stale parent environment might say
+	var got []string
+	for _, e := range mcpChildEnv() {
+		if strings.HasPrefix(e, "ZBXCTL_CONTEXT=") {
+			got = append(got, e)
+		}
+	}
+	if len(got) == 0 || got[len(got)-1] != "ZBXCTL_CONTEXT=lab" {
+		t.Fatalf("the pinned context must be the last (winning) value: %v", got)
+	}
+	if note := mcpContextNote(); !strings.Contains(note, "lab") {
+		t.Fatalf("the server must say which context it is pinned to: %q", note)
+	}
+}
+
+func TestMCPRefusesToStartWithoutAConnectionToPin(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("ZBXCTL_CONTEXT", "")
+	t.Setenv("ZBXCTL_URL", "")
+	old := mcpPinnedContext
+	defer func() { mcpPinnedContext = old }()
+	if err := runChildArgs("mcp"); exitOf(err) != 5 {
+		t.Fatalf("mcp with nothing to pin must refuse to start (exit 5): %v", err)
+	}
+}
+
+func TestDefaultTierIsReadonly(t *testing.T) {
+	f := &fakeZabbix{Handler: hostGetter, DefaultTier: true}
+	if _, err := runFake(t, f, "delete", "host", "web1", "--apply"); exitOf(err) != 8 || len(f.called("host.delete")) != 0 {
+		t.Fatalf("a connection with no tier must not write: %v", err)
+	}
+	f = &fakeZabbix{Handler: hostGetter, DefaultTier: true}
+	if _, err := runFake(t, f, "get", "hosts"); err != nil {
+		t.Fatalf("reads are still fine: %v", err)
+	}
+}
+
+func TestAPICallRefusesMoreCodeRunningCreators(t *testing.T) {
+	for _, m := range []string{"configuration.import", "connector.create", "item.create", "itemprototype.create", "settings.update", "mfa.update", "housekeeping.update", "proxy.update", "module.update", "discoveryrule.create"} {
+		f := &fakeZabbix{}
+		_, err := runFake(t, f, "api", "call", m, "--params", `{"x":1}`, "--apply", "--no-state")
+		if err == nil || len(f.called(m)) != 0 {
+			t.Errorf("%s must be refused without api_call_admin: %v", m, err)
+		}
+	}
+	f := &fakeZabbix{}
+	if _, err := runFake(t, f, "api", "call", "configuration.export", "--params", `{"options":{}}`); err != nil || len(f.called("configuration.export")) != 1 {
+		t.Fatalf("export is a read and stays allowed: %v", err)
+	}
+}

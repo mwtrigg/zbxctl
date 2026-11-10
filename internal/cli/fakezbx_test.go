@@ -35,6 +35,9 @@ type fakeZabbix struct {
 	// Context is YAML for the fields of the active context (permissions, allowed_scripts...),
 	// written to a config file; the URL and token still come from the environment.
 	Context string
+	// DefaultTier leaves the permission tier unset, so the connection gets the default
+	// (readonly). Otherwise the tests run with ZBXCTL_PERMISSIONS=write.
+	DefaultTier bool
 }
 
 func (f *fakeZabbix) called(method string) []rpcCall {
@@ -93,6 +96,11 @@ func runFake(t *testing.T, f *fakeZabbix, args ...string) (string, error) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("ZBXCTL_STATE_DIR", "")
+	if f.DefaultTier || strings.Contains(f.Context, "permissions") {
+		t.Setenv("ZBXCTL_PERMISSIONS", "")
+	} else {
+		t.Setenv("ZBXCTL_PERMISSIONS", "write")
+	}
 
 	if f.Context != "" {
 		dir := os.Getenv("HOME") + "/.config/zbxctl"

@@ -70,6 +70,7 @@ func runCLI(t *testing.T, args ...string) (string, []string) {
 	}))
 	defer srv.Close()
 	t.Setenv("ZBXCTL_URL", srv.URL)
+	t.Setenv("ZBXCTL_PERMISSIONS", "write")
 	t.Setenv("ZBXCTL_API_TOKEN", "test-token")
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())

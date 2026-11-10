@@ -93,19 +93,21 @@ func (e *PermissionError) Error() string {
 }
 
 // CheckPermission returns an error if the context's tier does not permit required.
-// An empty Permissions field defaults to "write" (backwards-compatible). A tier
-// that is not one of the three is refused, never granted: a typo must not give
-// more access than was meant.
+// An empty Permissions field means "readonly": a connection that was never given a
+// tier (credentials from the environment and no config, say) must not be able to
+// change anything. Set permissions: write in the config, or ZBXCTL_PERMISSIONS=write.
+// A tier that is not one of the three is refused, never granted: a typo must not
+// give more access than was meant.
 func (ctx *Context) CheckPermission(required string) error {
 	tier := normalizeTier(ctx.Permissions)
 	if tier == "" {
-		tier = "write"
+		tier = "readonly"
 	}
 	have, req := permLevel(tier), permLevel(required)
 	if have < 0 || have < req {
 		shown := ctx.Permissions
 		if shown == "" {
-			shown = "write (default)"
+			shown = "readonly (the default: set permissions: write in the config or ZBXCTL_PERMISSIONS=write)"
 		}
 		return &PermissionError{Required: required, Have: shown}
 	}
@@ -199,10 +201,9 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	if ctxName != "" {
 		if c, ok := cfg.Contexts[ctxName]; ok {
 			ctx = c
-		} else if contextOverride != "" || os.Getenv("ZBXCTL_CONTEXT") != "" {
-			// Named on purpose (flag or environment) but not in the file: a
-			// misspelt name must not fall back to an empty context that the
-			// environment then fills in with the default (write) tier.
+		} else {
+			// Named (by flag, environment or current_context) but not in the file: it
+			// must not fall back to an empty context that the environment then fills in.
 			return nil, nil, fmt.Errorf("context %q is not defined in the config file", ctxName)
 		}
 	}
@@ -211,6 +212,12 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	}
 
 	// Per-field env var overrides.
+	if v := os.Getenv("ZBXCTL_PERMISSIONS"); v != "" {
+		if err := ValidateTier(v); err != nil {
+			return nil, nil, fmt.Errorf("ZBXCTL_PERMISSIONS: %w", err)
+		}
+		ctx.Permissions = v
+	}
 	if v := os.Getenv("ZBXCTL_URL"); v != "" {
 		ctx.URL = v
 	}
@@ -275,6 +282,29 @@ func warnIfReadable(path string, data []byte) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "warning: %s holds credentials but is readable by other users (mode %04o); run: chmod 600 %s\n", path, fi.Mode().Perm(), path)
+}
+
+// ActiveContextName returns the name of the context a command would use (flag,
+// ZBXCTL_CONTEXT, then current_context), "" if none is named, and an error if the
+// name is not in the config file. The MCP server resolves it once at start and pins it.
+func ActiveContextName(contextOverride string) (string, error) {
+	cfg, err := LoadConfigFile()
+	if err != nil {
+		return "", err
+	}
+	name := cfg.CurrentContext
+	if v := os.Getenv("ZBXCTL_CONTEXT"); v != "" {
+		name = v
+	}
+	if contextOverride != "" {
+		name = contextOverride
+	}
+	if name != "" {
+		if _, ok := cfg.Contexts[name]; !ok {
+			return "", fmt.Errorf("context %q is not defined in the config file", name)
+		}
+	}
+	return name, nil
 }
 
 // LoadConfigFile reads the raw config file without requiring a valid context or URL.

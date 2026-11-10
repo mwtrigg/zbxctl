@@ -23,7 +23,9 @@ func TestCheckPermission(t *testing.T) {
 		{"readonly permits readonly", "readonly", "readonly", false},
 		{"readonly blocks operator", "readonly", "operator", true},
 		{"readonly blocks write", "readonly", "write", true},
-		{"empty defaults to write", "", "write", false},
+		{"empty defaults to readonly: no write", "", "write", true},
+		{"empty defaults to readonly: no operator", "", "operator", true},
+		{"empty still allows reads", "", "readonly", false},
 		{"unknown tier is refused for write", "superadmin", "write", true},
 		{"unknown tier is refused even for readonly", "read-only", "readonly", true},
 		{"tier is case and space tolerant", " ReadOnly ", "write", true},
@@ -262,5 +264,52 @@ func TestModeDefaultsToDryRunAndEnvOverridesFile(t *testing.T) {
 	_, ctx, _ = LoadConfig("")
 	if ctx.ApplyByDefault() {
 		t.Fatal("the environment must override the file")
+	}
+}
+
+func TestDanglingCurrentContextAndDefaultTierFailClosed(t *testing.T) {
+	// current_context names a context that is not in the file; credentials come from the environment
+	writeConfig(t, "current_context: gone\ncontexts:\n  ro:\n    url: https://zbx.example.com\n    permissions: readonly\n")
+	t.Setenv("ZBXCTL_URL", "https://zbx.example.com")
+	t.Setenv("ZBXCTL_API_TOKEN", "t")
+	if _, _, err := LoadConfig(""); err == nil || !contains(err.Error(), "not defined") {
+		t.Fatalf("a dangling current_context must be an error, got %v", err)
+	}
+	// no config file at all, environment credentials, no tier: readonly, not write
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("ZBXCTL_CONTEXT", "")
+	t.Setenv("ZBXCTL_PERMISSIONS", "")
+	_, ctx, err := LoadConfig("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.CheckPermission("write") == nil {
+		t.Fatal("a connection that was never given a tier must not be able to write")
+	}
+	t.Setenv("ZBXCTL_PERMISSIONS", "write")
+	if _, ctx, _ := LoadConfig(""); ctx.CheckPermission("write") != nil {
+		t.Fatal("ZBXCTL_PERMISSIONS=write is the explicit way to allow it")
+	}
+	t.Setenv("ZBXCTL_PERMISSIONS", "wirte")
+	if _, _, err := LoadConfig(""); err == nil {
+		t.Fatal("a misspelt ZBXCTL_PERMISSIONS must be an error")
+	}
+}
+
+func TestActiveContextName(t *testing.T) {
+	writeConfig(t, "current_context: lab\ncontexts:\n  lab:\n    url: https://a.example.com\n  prod:\n    url: https://b.example.com\n")
+	if n, err := ActiveContextName(""); err != nil || n != "lab" {
+		t.Fatalf("%q %v", n, err)
+	}
+	t.Setenv("ZBXCTL_CONTEXT", "prod")
+	if n, _ := ActiveContextName(""); n != "prod" {
+		t.Fatalf("the environment outranks current_context: %q", n)
+	}
+	if n, _ := ActiveContextName("lab"); n != "lab" {
+		t.Fatalf("the flag outranks the environment: %q", n)
+	}
+	if _, err := ActiveContextName("nosuch"); err == nil {
+		t.Fatal("an unknown name is an error")
 	}
 }
