@@ -386,6 +386,9 @@ func TestMaintenanceCreateDefaultsToNowAndAcceptsHumanDurations(t *testing.T) {
 	_, _ = runCLI(t, "maintenance", "create", "--name", "w", "--host", "web1", "--duration", "soon")
 	if lastErr == nil {
 		t.Fatal("a bad duration must be refused")
+	}
+}
+
 func TestDeleteGroupGuards(t *testing.T) {
 	defer resetBulkFlags()
 	defer func() { extraResults = nil; groupAllow = false }()
