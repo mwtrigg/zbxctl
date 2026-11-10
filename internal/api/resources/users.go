@@ -36,7 +36,7 @@ func GetUsers(c *api.Client, f UserFilter) ([]User, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("user.get", params)
+	raw, err := c.CallList("user.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("user.get: %w", err)
 	}

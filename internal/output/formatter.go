@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -22,6 +23,10 @@ const (
 
 // Raw includes the raw API values (*_raw, *_unix) next to the readable ones.
 var Raw bool
+
+// Field, when set, makes Print emit just that field of each row, one value
+// per line (list values one element per line).
+var Field string
 
 // Command is the command path reported in the JSON envelope's meta.
 var Command string
@@ -78,6 +83,9 @@ type Column struct {
 
 // Print writes rows to stdout in the requested format.
 func Print(format Format, columns []Column, rows []map[string]any) error {
+	if Field != "" {
+		return printField(rows)
+	}
 	rows = stripRaw(rows)
 	switch format {
 	case FormatJSON:
@@ -194,4 +202,35 @@ func cell(v any) any {
 		return strings.Join(l, ",")
 	}
 	return v
+}
+
+// FieldError is returned when --field names a field that does not exist.
+type FieldError struct{ Msg string }
+
+func (e *FieldError) Error() string { return e.Msg }
+
+func printField(rows []map[string]any) error {
+	for _, row := range rows {
+		v, ok := row[Field]
+		if !ok {
+			keys := make([]string, 0, len(row))
+			for k := range row {
+				if !strings.HasSuffix(k, "_raw") && !strings.HasSuffix(k, "_unix") {
+					keys = append(keys, k)
+				}
+			}
+			sort.Strings(keys)
+			return &FieldError{fmt.Sprintf("no such field %q (available: %s)", Field, strings.Join(keys, ", "))}
+		}
+		switch t := v.(type) {
+		case nil:
+		case []string:
+			for _, e := range t {
+				fmt.Println(e)
+			}
+		default:
+			fmt.Println(t)
+		}
+	}
+	return nil
 }

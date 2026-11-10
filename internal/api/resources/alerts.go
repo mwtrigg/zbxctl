@@ -58,7 +58,7 @@ func GetAlerts(c *api.Client, f AlertFilter) ([]Alert, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("alert.get", params)
+	raw, err := c.CallList("alert.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("alert.get: %w", err)
 	}

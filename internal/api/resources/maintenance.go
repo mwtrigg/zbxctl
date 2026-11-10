@@ -32,7 +32,7 @@ func GetMaintenances(c *api.Client, f MaintenanceFilter) ([]Maintenance, error) 
 	if f.Limit > 0 {
 		params["limit"] = f.Limit
 	}
-	raw, err := c.Call("maintenance.get", params)
+	raw, err := c.CallList("maintenance.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("maintenance.get: %w", err)
 	}

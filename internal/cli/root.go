@@ -2,8 +2,6 @@ package cli
 
 import (
 	"errors"
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,6 +16,8 @@ var (
 	flagContext  string
 	flagYes      bool
 	flagApply    bool
+	flagFilter   []string
+	flagField    string
 	flagInsecure bool
 	flagRaw      bool
 )
@@ -46,6 +46,7 @@ Single static binary. Machine-readable output. Structured errors.`,
 	SilenceErrors: true,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		output.Raw = flagRaw
+		output.Field = flagField
 		if flagYes {
 			flagApply = true // --yes is an alias for --apply
 		}
@@ -63,7 +64,12 @@ func classify(err error) int {
 	var nfe *resources.NotFoundError
 	var ue *usageError
 	var rpc *api.RPCError
+	var fe *output.FieldError
 	switch {
+	case errors.As(err, &fe):
+		return output.ExitUsage
+	case isCobraUsage(err):
+		return output.ExitUsage
 	case errors.As(err, &ue):
 		return output.ExitUsage
 	case errors.As(err, &nfe):
@@ -78,6 +84,17 @@ func classify(err error) int {
 	return output.ExitError
 }
 
+// isCobraUsage recognises cobra's own flag/argument/command errors.
+func isCobraUsage(err error) bool {
+	m := err.Error()
+	for _, p := range []string{"unknown command", "unknown flag", "unknown shorthand flag", "accepts ", "requires at least", "required flag", "invalid argument", "flag needs an argument"} {
+		if strings.HasPrefix(m, p) || strings.Contains(m, p) && strings.HasPrefix(m, "unknown") {
+			return true
+		}
+	}
+	return false
+}
+
 // cliFail prints err as a structured error with the exit code it classifies to.
 func cliFail(outFmt output.Format, err error) error {
 	return cliPrintErr(outFmt, err.Error(), classify(err))
@@ -90,8 +107,9 @@ func Execute() int {
 		if errors.As(err, &ce) {
 			return ce.code
 		}
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		return output.ExitError
+		code := classify(err)
+		output.PrintError(output.Format(flagOutput), err.Error(), code)
+		return code
 	}
 	return output.ExitSuccess
 }
@@ -105,6 +123,10 @@ func init() {
 		"execute state-changing commands (default is a dry run that changes nothing)")
 	rootCmd.PersistentFlags().BoolVarP(&flagYes, "yes", "y",
 		false, "alias for --apply; also skips the upgrade prompt")
+	rootCmd.PersistentFlags().StringArrayVar(&flagFilter, "filter", nil,
+		"exact-match API filter KEY=VALUE for list commands (repeatable; a repeated KEY ORs its values)")
+	rootCmd.PersistentFlags().StringVar(&flagField, "field", "",
+		"print only this field of each result, one value per line (lists print one element per line)")
 	rootCmd.PersistentFlags().BoolVar(&flagRaw, "raw", false,
 		"include raw API values (*_raw, *_unix) next to the readable ones")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure",

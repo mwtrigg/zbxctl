@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -59,9 +60,9 @@ func runDiagnoseHost(cmd *cobra.Command, args []string) error {
 		return cliFail(outFmt, err)
 	}
 
-	sinceDur, err := time.ParseDuration(diagSince)
+	sinceDur, err := parseWindow(diagSince)
 	if err != nil {
-		return cliPrintErr(outFmt, fmt.Sprintf("invalid --since %q: use Go duration e.g. 1h, 24h", diagSince), output.ExitUsage)
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --since %q: use a duration like 30m, 24h, 7d, 2w", diagSince), output.ExitUsage)
 	}
 	sinceTS := time.Now().Add(-sinceDur).Unix()
 
@@ -247,4 +248,15 @@ func runDiagnoseHost(cmd *cobra.Command, args []string) error {
 	}
 	enc.SetIndent("", "  ")
 	return enc.Encode(snap)
+}
+
+// parseWindow parses a look-back window such as 30m, 24h, 7d or 2w (also any
+// Go duration like 1h30m).
+func parseWindow(s string) (time.Duration, error) {
+	if m := relTimeRe.FindStringSubmatch(s); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		unit := map[string]time.Duration{"m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour}[m[2]]
+		return time.Duration(n) * unit, nil
+	}
+	return time.ParseDuration(s)
 }

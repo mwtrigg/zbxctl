@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -33,6 +34,16 @@ func newClient() (*api.Client, output.Format, *config.Context, error) {
 	c, err := api.NewClient(context.Background(), ctx)
 	if err != nil {
 		return nil, outFmt, nil, err
+	}
+	for _, kv := range flagFilter {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return nil, outFmt, nil, &usageError{fmt.Sprintf("invalid --filter %q: use KEY=VALUE", kv)}
+		}
+		if c.Filters == nil {
+			c.Filters = map[string][]string{}
+		}
+		c.Filters[k] = append(c.Filters[k], v)
 	}
 	return c, outFmt, ctx, nil
 }
@@ -771,6 +782,7 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 
 	cols := []output.Column{
 		{Key: "eventid", Header: "EVENT_ID"},
+		{Key: "host", Header: "HOST"},
 		{Key: "name", Header: "NAME"},
 		{Key: "severity", Header: "SEVERITY"},
 		{Key: "status", Header: "STATUS"},
@@ -787,6 +799,7 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 		}
 		rows[i] = map[string]any{
 			"eventid":          p.EventID,
+			"host":             p.Host,
 			"objectid":         p.ObjectID,
 			"name":             p.Name,
 			"severity":         severityLabel(p.Severity),
