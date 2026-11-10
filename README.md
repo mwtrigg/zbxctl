@@ -35,6 +35,8 @@ contexts:
 
 Priority: CLI flag > `ZBXCTL_*` env var (`ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXCTL_CONTEXT`, ...) > config file > default. Never put a token in a command line or commit one.
 
+Before-state files (see below) can be turned off per context with `before_state: false` in the config, or with `ZBXCTL_BEFORE_STATE=false`; `state_dir` / `ZBXCTL_STATE_DIR` moves them. The flags `--no-state` and `--state-dir` win over both.
+
 `permissions` caps what a context may do: `readonly` blocks all writes, `operator` allows enable/disable/acknowledge/maintenance, `write` allows everything. `run script` additionally needs the script listed in the context's `allowed_scripts` and a one-time confirmation token.
 
 ## Escape hatch

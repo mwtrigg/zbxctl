@@ -125,6 +125,7 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 		if err != nil {
 			return cliFail(outFmt, err)
 		}
+		applyStateSettings(cmd, ctx)
 		read := isReadMethod(method)
 		if !read {
 			if err := ctx.CheckPermission("write"); err != nil {
