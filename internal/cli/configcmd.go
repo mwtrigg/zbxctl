@@ -136,7 +136,7 @@ func runExport(noun string, args []string) error {
 			}
 			return nil
 		}
-		if err := os.WriteFile(exportFile, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(exportFile, []byte(body), 0o600); err != nil {
 			return cliFail(outFmt, fmt.Errorf("writing %s: %w", exportFile, err))
 		}
 		return output.Print(outFmt, []output.Column{{Key: "name", Header: "NAME"}, {Key: "file", Header: "FILE"}, {Key: "format", Header: "FORMAT"}},
@@ -197,7 +197,7 @@ func runExport(noun string, args []string) error {
 			return cliFail(outFmt, fmt.Errorf("%s: %w", t.name, err))
 		}
 		file := filepath.Join(exportDir, safeFileName(t.name)+"."+exportFormat)
-		if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
 			return cliFail(outFmt, err)
 		}
 		rows = append(rows, map[string]any{"name": t.name, "file": file, "format": exportFormat, "bytes": len(body)})

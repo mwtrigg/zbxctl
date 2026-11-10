@@ -147,6 +147,7 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 		return nil, nil, fmt.Errorf("reading config: %w", err)
 	}
 	if err == nil {
+		warnIfReadable(path, data)
 		if err := parseConfig(data, cfg); err != nil {
 			return nil, nil, fmt.Errorf("parsing config: %w", err)
 		}
@@ -221,6 +222,19 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	}
 
 	return cfg, &ctx, nil
+}
+
+// warnIfReadable warns when a config file that holds a token or a password can be
+// read by other users on the machine.
+func warnIfReadable(path string, data []byte) {
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm()&0o077 == 0 {
+		return
+	}
+	if !bytes.Contains(data, []byte("api_token")) && !bytes.Contains(data, []byte("password")) {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "warning: %s holds credentials but is readable by other users (mode %04o); run: chmod 600 %s\n", path, fi.Mode().Perm(), path)
 }
 
 // LoadConfigFile reads the raw config file without requiring a valid context or URL.

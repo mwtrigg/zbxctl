@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/mwtrigg/zbxctl/internal/output"
 	"io"
 	"os"
 	"strings"
@@ -42,23 +43,10 @@ func scriptAllowed(entries []string, name, id, command string) (bool, string) {
 	return false, fmt.Sprintf("script %q is not in allowed_scripts for this context; to allow it as it is now, add %q", name, pinName)
 }
 
-// printable makes text safe to show on a terminal: control characters, including
+// printable is output.Printable: it makes text safe to show on a terminal: control characters, including
 // ESC, carriage return and the rest of what can rewrite or hide earlier output,
 // are shown as visible escapes. Newline and tab are kept.
-func printable(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == '\n' || r == '\t':
-			b.WriteRune(r)
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0):
-			fmt.Fprintf(&b, "\\x%02x", r)
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+func printable(s string) string { return output.Printable(s) }
 
 // isTerminal reports whether f is an interactive terminal: a character device
 // other than /dev/null (which is one too, and is what a detached process gets).

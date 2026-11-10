@@ -157,7 +157,7 @@ func printTable(columns []Column, rows []map[string]any) error {
 	for _, row := range rows {
 		r := make(table.Row, len(columns))
 		for i, c := range columns {
-			r[i] = cell(row[c.Key])
+			r[i] = safeCell(cell(row[c.Key]))
 		}
 		t.AppendRow(r)
 	}
@@ -231,6 +231,39 @@ func cell(v any) any {
 			return "-"
 		}
 		return strings.Join(l, ",")
+	}
+	return v
+}
+
+// Printable makes text safe for a terminal: control characters, including ESC and
+// carriage return, which can rewrite or hide what was printed before, are shown as
+// visible \xNN escapes. Newline and tab are kept. Zabbix strings (problem names,
+// item values) are written by third parties and are shown raw in tables otherwise.
+func Printable(s string) string {
+	clean := true
+	for _, r := range s {
+		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r < 0xa0) {
+			fmt.Fprintf(&b, "\\x%02x", r)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func safeCell(v any) any {
+	if s, ok := v.(string); ok {
+		return Printable(s)
 	}
 	return v
 }

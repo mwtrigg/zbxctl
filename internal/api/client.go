@@ -98,6 +98,9 @@ func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 
 	httpClient := &http.Client{Transport: transport, Timeout: Timeout}
 	endpoint := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/api_jsonrpc.php") + "/api_jsonrpc.php"
+	if strings.HasPrefix(strings.ToLower(endpoint), "http://") {
+		fmt.Fprintln(os.Stderr, "warning: the Zabbix URL is plain http://, so the API token or password is sent in clear text; use https://")
+	}
 
 	c := &Client{
 		httpClient: httpClient,

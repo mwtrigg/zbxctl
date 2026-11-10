@@ -1,6 +1,7 @@
 package config
 
 import (
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -165,5 +166,32 @@ contexts:
 	}
 	if err := WriteCurrentContext("nosuch"); err == nil {
 		t.Fatal("an unknown context must be refused")
+	}
+}
+
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	fn()
+	_ = w.Close()
+	os.Stderr = old
+	b, _ := io.ReadAll(r)
+	return string(b)
+}
+
+func TestLoadConfigWarnsAboutAReadableCredentialsFile(t *testing.T) {
+	const src = "current_context: lab\ncontexts:\n  lab:\n    url: https://zbx.example.com\n    api_token: t\n"
+	writeConfig(t, src)
+	path := os.Getenv("HOME") + "/.config/zbxctl/config.yaml"
+	if out := captureStderr(t, func() { _, _, _ = LoadConfig("") }); out != "" {
+		t.Fatalf("a 0600 file needs no warning: %q", out)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out := captureStderr(t, func() { _, _, _ = LoadConfig("") }); !strings.Contains(out, "chmod 600") {
+		t.Fatalf("a world-readable file with a token must warn: %q", out)
 	}
 }

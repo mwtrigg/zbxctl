@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -84,5 +87,19 @@ func TestParseVersionAndChecks(t *testing.T) {
 	v, _ := ParseVersion("8.0")
 	if !v.AtLeast(7, 4) || !v.AtLeast(8, 0) || v.AtLeast(8, 1) {
 		t.Error("AtLeast")
+	}
+}
+
+func TestPlainHTTPWarnsThatTheTokenTravelsInClearText(t *testing.T) {
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	_, _ = NewClient(context.Background(), &config.Context{URL: "http://zbx.example.com", APIToken: "t"})
+	_, _ = NewClient(context.Background(), &config.Context{URL: "https://zbx.example.com", APIToken: "t"})
+	_ = w.Close()
+	os.Stderr = old
+	b, _ := io.ReadAll(r)
+	if strings.Count(string(b), "plain http://") != 1 {
+		t.Fatalf("exactly the http:// URL must warn: %q", b)
 	}
 }
