@@ -429,3 +429,32 @@ func TestSetMacroCreatesThenUpdatesWithRightMethods(t *testing.T) {
 		t.Fatalf("global create: %v %v", err, *calls3)
 	}
 }
+
+func TestUpdateHostProxyParams(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"host.get": `[{"hostid":"10","host":"h","name":"h","status":"0","hostgroups":[{"groupid":"1"}],"parentTemplates":[]}]`, "host.update": `{"hostids":["10"]}`})
+	for _, tc := range []struct {
+		in   UpdateHostInput
+		want map[string]float64
+	}{
+		{UpdateHostInput{HostID: "10", MonitoredBy: "server"}, map[string]float64{"monitored_by": 0}},
+		{UpdateHostInput{HostID: "10", MonitoredBy: "proxy", ProxyID: "3"}, map[string]float64{"monitored_by": 1}},
+		{UpdateHostInput{HostID: "10", MonitoredBy: "group", ProxyGroupID: "4"}, map[string]float64{"monitored_by": 2}},
+	} {
+		*calls = nil
+		if _, err := UpdateHost(c, tc.in); err != nil {
+			t.Fatal(err)
+		}
+		var p map[string]any
+		for _, call := range *calls {
+			if call["method"] == "host.update" {
+				p = call["params"].(map[string]any)
+			}
+		}
+		if p["monitored_by"].(float64) != tc.want["monitored_by"] {
+			t.Errorf("%+v -> %v", tc.in, p)
+		}
+		if tc.in.MonitoredBy == "proxy" && p["proxyid"] != "3" || tc.in.MonitoredBy == "group" && p["proxy_groupid"] != "4" {
+			t.Errorf("ids missing: %v", p)
+		}
+	}
+}

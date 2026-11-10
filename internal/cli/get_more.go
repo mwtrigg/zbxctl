@@ -83,3 +83,54 @@ func init() {
 	getActionsCmd.Flags().IntVar(&actionLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getMacrosCmd, getActionsCmd)
 }
+
+var getProxiesCmd = &cobra.Command{
+	Use:   "proxies",
+	Short: "List proxies: mode, last seen, version, compatibility and how many hosts each monitors",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, outFmt, _, err := newClient()
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		ps, err := resources.GetProxies(c)
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		mode := map[string]string{"0": "active", "1": "passive"}
+		compat := map[string]string{"0": "undefined", "1": "current", "2": "outdated", "3": "unsupported"}
+		state := map[string]string{"0": "unknown", "1": "offline", "2": "online"}
+		cols := []output.Column{{Key: "proxyid", Header: "PROXY_ID"}, {Key: "name", Header: "NAME"}, {Key: "mode", Header: "MODE"}, {Key: "state", Header: "STATE"}, {Key: "last_seen", Header: "LAST_SEEN"}, {Key: "version", Header: "VERSION"}, {Key: "compatibility", Header: "COMPAT"}, {Key: "hosts", Header: "HOSTS"}}
+		rows := make([]map[string]any, len(ps))
+		for i, p := range ps {
+			rows[i] = map[string]any{"proxyid": p.ID, "name": p.Name, "mode": mode[p.Mode], "address": p.Address, "state": state[p.State], "last_seen": fmtUnix(p.LastAccess),
+				"version": resources.VersionLabel(p.Version), "compatibility": compat[p.Compatibility], "hosts": p.Hosts}
+		}
+		return output.Print(outFmt, cols, rows)
+	},
+}
+
+var getProxyGroupsCmd = &cobra.Command{
+	Use:   "proxy-groups",
+	Short: "List proxy groups with their state and proxy count",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, outFmt, _, err := newClient()
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		gs, err := resources.GetProxyGroups(c)
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		state := map[string]string{"0": "unknown", "1": "offline", "2": "recovering", "3": "online", "4": "degrading"}
+		cols := []output.Column{{Key: "proxy_groupid", Header: "GROUP_ID"}, {Key: "name", Header: "NAME"}, {Key: "state", Header: "STATE"}, {Key: "proxies", Header: "PROXIES"}, {Key: "min_online", Header: "MIN_ONLINE"}, {Key: "failover_delay", Header: "FAILOVER"}}
+		rows := make([]map[string]any, len(gs))
+		for i, g := range gs {
+			rows[i] = map[string]any{"proxy_groupid": g.ID, "name": g.Name, "state": state[g.State], "proxies": g.Proxies, "min_online": g.MinOnline, "failover_delay": g.FailoverDelay}
+		}
+		return output.Print(outFmt, cols, rows)
+	},
+}
+
+func init() { getCmd.AddCommand(getProxiesCmd, getProxyGroupsCmd) }
