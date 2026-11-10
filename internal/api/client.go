@@ -6,10 +6,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/mwtrigg/zbxctl/internal/config"
 )
@@ -26,6 +28,20 @@ func (e *RPCError) Error() string {
 		return fmt.Sprintf("rpc error %d: %s (%s)", e.Code, e.Message, e.Data)
 	}
 	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
+}
+
+// Sentinel errors the CLI maps to exit codes.
+var (
+	ErrConnect = errors.New("cannot reach Zabbix")
+	ErrAuth    = errors.New("authentication failed")
+)
+
+// IsAuth reports whether the RPC error means the token or login was refused.
+func (e *RPCError) IsAuth() bool {
+	m := strings.ToLower(e.Message + " " + e.Data)
+	return strings.Contains(m, "not authorised") || strings.Contains(m, "not authorized") ||
+		strings.Contains(m, "session terminated") || strings.Contains(m, "incorrect user name or password") ||
+		strings.Contains(m, "api token")
 }
 
 // Client is a Zabbix JSON-RPC 2.0 client.
@@ -141,9 +157,12 @@ func (c *Client) callRaw(ctx context.Context, method string, params any) (json.R
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrConnect, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("%w: HTTP %d", ErrAuth, resp.StatusCode)
+	}
 
 	var rpcResp rpcResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
