@@ -520,3 +520,60 @@ func TestRollupTrendsDayWeightedAndDST(t *testing.T) {
 		t.Fatal("unknown period must be refused")
 	}
 }
+
+func TestMappingAndExpressionParsing(t *testing.T) {
+	m, err := ParseMapping("equals", "0=Down")
+	if err != nil || m.Type != "0" || m.Value != "0" || m.NewValue != "Down" || m.Label() != "0=Down" {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if m, _ := ParseMapping("ge", "5=High"); m.Type != "1" || m.Label() != ">=5=High" {
+		t.Fatalf("ge: %+v", m)
+	}
+	if m, _ := ParseMapping("range", "1-5=Low"); m.Type != "3" || m.Value != "1-5" {
+		t.Fatalf("range: %+v", m)
+	}
+	if m, _ := ParseMapping("regexp", "^ab=x=y"); m.Value != "^ab=x" || m.NewValue != "y" { // the last = splits
+		t.Fatalf("regexp keeps earlier '=': %+v", m)
+	}
+	if m, _ := ParseMapping("default", "Unknown"); m.Type != "5" || m.NewValue != "Unknown" {
+		t.Fatalf("default: %+v", m)
+	}
+	for _, bad := range []string{"", "novalue", "=Text", "key="} {
+		if _, err := ParseMapping("equals", bad); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+	e, err := ParseExpression("matches:^(ext4|xfs)$", true)
+	if err != nil || e.Type != "3" || e.Expression != "^(ext4|xfs)$" || e.CaseSensitive != "1" {
+		t.Fatalf("%+v %v", e, err)
+	}
+	if e, _ := ParseExpression("any:a,b", false); e.Type != "1" || e.Delimiter != "," || e.CaseSensitive != "0" {
+		t.Fatalf("any: %+v", e)
+	}
+	for _, bad := range []string{"", "nocolon", "bogus:x"} {
+		if _, err := ParseExpression(bad, false); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+}
+
+func TestValueMapCreateAndOwnerNames(t *testing.T) {
+	c, calls := newFake(t, map[string]string{
+		"valuemap.create": `{"valuemapids":["9"]}`,
+		"valuemap.get":    `[{"valuemapid":"9","hostid":"7","name":"S","mappings":[{"type":"0","value":"1","newvalue":"Up"}]}]`,
+		"template.get":    `[{"templateid":"7","host":"tpl"}]`,
+		"host.get":        `[]`,
+	})
+	id, err := CreateValueMap(c, "7", "S", []Mapping{{Type: "0", Value: "1", NewValue: "Up"}})
+	if err != nil || id != "9" {
+		t.Fatalf("%q %v", id, err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	if p["hostid"] != "7" || len(p["mappings"].([]any)) != 1 {
+		t.Fatalf("create params: %v", p)
+	}
+	vms, err := GetValueMaps(c, ValueMapFilter{})
+	if err != nil || len(vms) != 1 || vms[0].Owner != "tpl" {
+		t.Fatalf("owner name must come from the template: %+v %v", vms, err)
+	}
+}

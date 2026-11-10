@@ -19,6 +19,8 @@ Where a command does not exist, `zbxctl api call` reaches the method (reads free
 | maintenance | list, create, extend, shorten, delete |
 | user, user group | get, create, delete |
 | user macro | get, set, delete (host and global) |
+| value map | get, create, update, delete |
+| global regular expression | get, create, update, delete |
 | discovery | rules, lost items and triggers, delete lost |
 | proxy, proxy group | get, move a host between them |
 | audit log | get |
@@ -30,7 +32,7 @@ Where a command does not exist, `zbxctl api call` reaches the method (reads free
 
 - Action and media type create/update/delete, alert media setup.
 - Dashboards, graphs, maps, services/SLA (mostly UI-driven; export is the usual need).
-- Value maps, regular expressions, event correlation, connectors, network discovery rules (`drule`).
+- Event correlation, connectors, network discovery rules (`drule`).
 - API tokens (`token.*`): deliberately not exposed, since generating one would print a secret.
 - Roles and user directories, authentication and other global settings, housekeeping, HA nodes.
 - Host interfaces as their own object (they are shown on `get host` and `get interfaces`).

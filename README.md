@@ -109,7 +109,7 @@ Read (never change anything):
 get hosts | host | items | latestdata | history | trends | interfaces
 get triggers | problems | events | alerts
 get discovery | lost items | lost triggers
-get proxies | proxy-groups | auditlog
+get proxies | proxy-groups | auditlog | valuemaps | regexps
 get templates | template | groups | users | user | usergroups | scripts | macros | actions
 backtest --item k --when 'avg(5m)>90'   # replay an alert idea over history/trends; judge it against real problems
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
@@ -130,6 +130,8 @@ create user | delete user | create usergroup | delete usergroup
 create|update|delete group        # host groups; delete refuses groups that still have hosts
 create|update|delete item         # agent, agent-active, trapper, simple, calculated, dependent
 create|update|delete trigger      # from an expression; discovered and template objects are refused
+create|update|delete valuemap    # --map 0=Down --map 1=Up --default Unknown (also --map-ge/-le/-range/-regexp)
+create|update|delete regexp      # --expr 'matches:^(ext4|xfs)$'  (types: contains, any, not-contains, matches, not-matches)
 set macro | delete macro          # host or --global; secret values only from --value-file/--value-stdin
 update host --proxy <name|none> | --proxy-group <name>
 delete template <name> [--allow-linked]   # before-state keeps a full export
