@@ -42,9 +42,26 @@ type Context struct {
 	BeforeState *bool  `yaml:"before_state"`
 	StateDir    string `yaml:"state_dir"`
 
+	// Mode is what a command that changes things does when neither --apply nor
+	// --dry-run is given: "dry-run" (the default) only shows what it would do,
+	// "apply" does it. The MCP server ignores this and always defaults to dry-run.
+	Mode string `yaml:"mode"`
+
 	// StateKeep is how many before-state files to keep; older ones are deleted
 	// as new ones are written. nil means DefaultStateKeep; 0 means keep everything.
 	StateKeep *int `yaml:"state_keep"`
+}
+
+// ApplyByDefault reports whether this context applies changes unless --dry-run is given.
+func (c *Context) ApplyByDefault() bool { return strings.EqualFold(strings.TrimSpace(c.Mode), "apply") }
+
+// ValidateMode rejects anything but "", "dry-run" and "apply".
+func (c *Context) ValidateMode() error {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case "", "dry-run", "dryrun", "apply":
+		return nil
+	}
+	return fmt.Errorf("mode %q is not valid: use dry-run or apply", c.Mode)
 }
 
 // DefaultStateKeep is how many before-state files are kept unless configured.
@@ -223,6 +240,9 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 		if b, err := strconv.ParseBool(v); err == nil {
 			ctx.BeforeState = &b
 		}
+	}
+	if v := os.Getenv("ZBXCTL_MODE"); v != "" {
+		ctx.Mode = v
 	}
 	if v := os.Getenv("ZBXCTL_STATE_KEEP"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {

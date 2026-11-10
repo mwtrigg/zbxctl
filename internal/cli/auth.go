@@ -79,6 +79,7 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 		"pinned_version": ctx.APIVersion,
 		"tested_with":    api.Tested.String(),
 		"minimum":        api.MinSupported.String(),
+		"mode":           map[bool]string{true: "apply", false: "dry-run"}[ctx.ApplyByDefault()],
 	}
 	if v, err := api.ParseVersion(apiVersion); err == nil {
 		newer, cerr := v.Check()

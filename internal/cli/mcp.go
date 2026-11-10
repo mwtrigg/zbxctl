@@ -30,7 +30,7 @@ var mcpAllowWrites bool
 // for whoever configured the server.
 var mcpHiddenFlags = map[string]bool{
 	"file": true, "dir": true, "id-file": true, "value-file": true, "password-file": true, "params-file": true, "state-dir": true,
-	"insecure": true, "allow-unsupported": true, "yes": true, "output": true, "raw": true, "no-state": true,
+	"insecure": true, "allow-unsupported": true, "dry-run": true, "yes": true, "output": true, "raw": true, "no-state": true,
 	"show-secrets": true,
 	"context":      true, // the server's own environment pins the context; an agent must not retarget it
 }
@@ -38,8 +38,10 @@ var mcpHiddenFlags = map[string]bool{
 // mcpChildDenied are the flags a child started by the MCP server refuses even
 // when they arrive some other way (the child enforces the policy itself, so a
 // bug in how the arguments are assembled cannot defeat it). --output is the one
-// hidden flag the server itself passes.
-func mcpChildDenied(flag string) bool { return flag != "output" && mcpHiddenFlags[flag] }
+// hidden flags the server itself passes (--output, and --dry-run for a write without apply).
+func mcpChildDenied(flag string) bool {
+	return flag != "output" && flag != "dry-run" && mcpHiddenFlags[flag]
+}
 
 // untrustedNotice precedes every tool result: the text that follows comes from
 // Zabbix, and anyone who can write to a monitored host or a log can shape it.
@@ -183,6 +185,11 @@ func (t mcpTool) argsFor(in map[string]any) ([]string, error) {
 			args = append(args, "--"+k+"="+fmt.Sprint(v))
 		}
 	}
+	if t.write {
+		if applied, _ := in["apply"].(bool); !applied {
+			args = append(args, "--dry-run")
+		}
+	}
 	args = append(args, "--output", "json")
 	if len(positional) > 0 {
 		args = append(args, "--")
@@ -200,7 +207,7 @@ var mcpRunner = func(ctx context.Context, args []string) (stdout, stderr string,
 	cmd := exec.CommandContext(ctx, exe, args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	cmd.Env = append(os.Environ(), "ZBXCTL_FROM_MCP=1")
+	cmd.Env = mcpChildEnv()
 	err = cmd.Run()
 	if ee, ok := err.(*exec.ExitError); ok {
 		return out.String(), errb.String(), ee.ExitCode()
@@ -209,6 +216,13 @@ var mcpRunner = func(ctx context.Context, args []string) (stdout, stderr string,
 		return out.String(), err.Error(), 1
 	}
 	return out.String(), errb.String(), 0
+}
+
+// mcpChildEnv is the environment tool calls run in. An agent never inherits an
+// "apply by default" mode from the config: the environment says dry-run (it
+// outranks the config file), and writes also get --dry-run unless apply=true.
+func mcpChildEnv() []string {
+	return append(os.Environ(), "ZBXCTL_FROM_MCP=1", "ZBXCTL_MODE=dry-run")
 }
 
 type rpcMsg struct {

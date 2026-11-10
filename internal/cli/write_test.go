@@ -77,7 +77,7 @@ func runCLI(t *testing.T, args ...string) (string, []string) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	rootCmd.SetArgs(append([]string{"--apply=false", "--yes=false", "--raw=false"}, args...))
+	rootCmd.SetArgs(append([]string{"--apply=false", "--yes=false", "--raw=false", "--dry-run=false"}, args...))
 	err := rootCmd.Execute()
 	w.Close()
 	os.Stdout = old
@@ -189,6 +189,7 @@ func TestAcknowledgeSuppressAppliesWithUntil(t *testing.T) {
 func resetBulkFlags() {
 	bulkIDFile, bulkExpect, bulkStateDir, bulkNoState, bulkNoVerify = "", -1, "", false, false
 	bulkKeep, stateKeep, stateKeepFlag = -1, config.DefaultStateKeep, -1
+	flagDryRun = false
 }
 
 func TestBulkExpectGuardRefusesBeforeChangingAnything(t *testing.T) {
@@ -801,5 +802,70 @@ func TestStatePruneKeep(t *testing.T) {
 	left := countStateFiles(t, dir)
 	if lastErr != nil || len(left) != 2 || left[0].Name != "f5.json" || left[1].Name != "f4.json" {
 		t.Fatalf("--keep 2 keeps the newest two: err=%v left=%+v", lastErr, left)
+	}
+}
+
+func TestModeApplySetByEnvAppliesByDefaultAndDryRunOverrides(t *testing.T) {
+	defer resetBulkFlags()
+	t.Setenv("ZBXCTL_MODE", "apply")
+	dir := t.TempDir()
+	_, methods := runCLI(t, "disable", "host", "web1", "--state-dir", dir)
+	if lastErr != nil || !slices.Contains(methods, "host.update") {
+		t.Fatalf("mode apply must apply without --apply: err=%v methods=%v", lastErr, methods)
+	}
+	resetBulkFlags()
+	_, methods = runCLI(t, "disable", "host", "web1", "--state-dir", dir, "--dry-run")
+	if slices.Contains(methods, "host.update") {
+		t.Fatal("--dry-run must win over mode apply")
+	}
+	resetBulkFlags()
+	_, _ = runCLI(t, "disable", "host", "web1", "--state-dir", dir, "--dry-run", "--apply")
+	if lastErr == nil || exitCodeOf(lastErr) != output.ExitUsage {
+		t.Fatalf("--apply with --dry-run is a usage error: %v", lastErr)
+	}
+	resetBulkFlags()
+	t.Setenv("ZBXCTL_MODE", "yolo")
+	_, methods = runCLI(t, "disable", "host", "web1", "--state-dir", dir)
+	if lastErr == nil || slices.Contains(methods, "host.update") || exitCodeOf(lastErr) != output.ExitUsage {
+		t.Fatalf("an invalid mode must be refused: err=%v methods=%v", lastErr, methods)
+	}
+	resetBulkFlags()
+	t.Setenv("ZBXCTL_MODE", "dry-run")
+	_, methods = runCLI(t, "disable", "host", "web1", "--state-dir", dir)
+	if slices.Contains(methods, "host.update") {
+		t.Fatal("the default stays a dry run")
+	}
+}
+
+func TestModeApplyDoesNotMakeStatePruneDelete(t *testing.T) {
+	defer func() { resetBulkFlags(); stateDirFlag, stateOlderThan = "", "" }()
+	t.Setenv("ZBXCTL_MODE", "apply")
+	dir := t.TempDir()
+	writeStateFixture(t, dir, "old.json", "disable-host", 100*24*time.Hour, 1)
+	runCLI(t, "state", "prune", "--state-dir", dir, "--older-than", "30d")
+	if len(countStateFiles(t, dir)) != 1 {
+		t.Fatal("state prune deletes audit files, so it always needs an explicit --apply, whatever the mode")
+	}
+}
+
+func TestMCPNeverInheritsApplyMode(t *testing.T) {
+	var found string
+	for _, kv := range mcpChildEnv() {
+		if strings.HasPrefix(kv, "ZBXCTL_MODE=") {
+			found = kv // the last one wins in a child process
+		}
+	}
+	if found != "ZBXCTL_MODE=dry-run" {
+		t.Fatalf("the MCP child environment must force dry-run, got %q", found)
+	}
+	for _, tc := range []struct {
+		in    string
+		apply bool
+	}{{`{"args":["web1"]}`, false}, {`{"args":["web1"],"apply":false}`, false}, {`{"args":["web1"],"apply":true}`, true}} {
+		line := mcpRunnerCapture(t, tc.in, "zbxctl_disable_host")
+		hasApply, hasDry := slices.Contains(line, "--apply"), slices.Contains(line, "--dry-run")
+		if hasApply != tc.apply || hasDry == tc.apply {
+			t.Errorf("%s: --apply=%v --dry-run=%v in %v", tc.in, hasApply, hasDry, line)
+		}
 	}
 }

@@ -71,12 +71,14 @@ zbxctl diagnose host web-01                         # one call: problems, events
 | What you do | What happens |
 |---|---|
 | Any `get`, `diagnose`, `backtest`, `state`, `diff` | Reads only. Nothing changes. |
-| Any command that changes something | A **dry run**: it prints what it would do and exits 0. Add `--apply` (or `-y`) to do it. |
+| Any command that changes something | A **dry run**: it prints what it would do and exits 0. Add `--apply` (or `-y`) to do it. People who find that tedious can set `mode: apply` for a connection (below); `--dry-run` then previews a single command. |
 | A change to several targets | Every target is resolved first, so a typo changes nothing. `--expect N` refuses to run unless exactly N targets resolve. `--id-file` reads targets from a file. |
 | `--apply` on a change | Saves a **before-state file** (what was done, what the target looked like before), applies the changes one by one, then re-reads each target to **verify** it. |
 | `delete user` | Refuses `Admin` and the user that owns the credentials in use. |
 | Secrets | Passwords and secret macro values come from a file or stdin, never a flag; secret values are never printed or saved. |
 | `run script` | Needs the operator tier, the script on an allowlist pinned to its command (`name@sha256:<hash>`, so an edited script is refused), and a one-time code typed at a terminal (read from `/dev/tty`, so it cannot be piped in). |
+
+**Applying by default.** The dry run is the right default for agents and for a first look, and tedious for a person who knows what they are doing. For a connection you trust, set `mode: apply` in the config (or `ZBXCTL_MODE=apply`): changes then happen without `--apply`, and `--dry-run` previews one command. Everything else still protects you: bulk targets are all resolved first, `--expect` still guards, the before-state file is still saved and the result is still verified, `delete user` still refuses `Admin`, and `run script` still needs its allowlist and confirmation code. `state prune` deletes audit files, so it always needs an explicit `--apply`. `zbxctl auth status` shows the mode of the connection in use. **The MCP server ignores this setting**: an agent calling it always gets a dry run unless it passes `apply: true`.
 
 Permission tiers cap what a connection may do: `permissions: readonly | operator | write` in the config. A tier includes the ones below it; a misspelt tier is a config error, never full access.
 
@@ -212,7 +214,7 @@ zbxctl delete lost items --host web-01 --expect 3 --apply     # only objects dis
   {"mcpServers": {"zabbix": {"command": "zbxctl", "args": ["mcp"], "env": {"ZBXCTL_CONTEXT": "lab"}}}}
   ```
 
-  By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each is still a dry run until the call passes `apply: true`. Never offered: `run script`, `api call`, `upgrade`, `context use`, `state prune`, and anything that works on a file path. Results are marked as untrusted data, and the arguments an agent sends are positional values only: they cannot become flags.
+  By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each is still a dry run until the call passes `apply: true` (even if your config says `mode: apply`). Never offered: `run script`, `api call`, `upgrade`, `context use`, `state prune`, and anything that works on a file path. Results are marked as untrusted data, and the arguments an agent sends are positional values only: they cannot become flags.
 
 ## Configuration
 
@@ -229,6 +231,7 @@ contexts:
     proxy: ""                       # an HTTP proxy for this server
     default_limit: 100
     api_version: ""                 # pin e.g. "7.4" or "8.0"; empty = detect
+    mode: dry-run                   # dry-run (default) or apply: what a change does without --apply/--dry-run
     permissions: write              # readonly | operator | write
     allowed_scripts: []             # what `run script` may execute, as name@sha256:<hash of the command>; empty = blocked (a refusal prints the entry to add)
     api_call_admin: false           # true lets `api call` write user, token, script, action, role... objects
@@ -245,6 +248,7 @@ Priority for every setting: command-line flag, then environment variable, then t
 | `ZBXCTL_CONTEXT` | which context to use |
 | `ZBXCTL_INSECURE`, `ZBXCTL_CA_FILE` | TLS (`--insecure` always prints a warning) |
 | `ZBXCTL_API_VERSION` | pin the Zabbix version |
+| `ZBXCTL_MODE` | `dry-run` (default) or `apply`: what a change does when neither `--apply` nor `--dry-run` is given |
 | `ZBXCTL_BEFORE_STATE`, `ZBXCTL_STATE_DIR`, `ZBXCTL_STATE_KEEP` | the before-state files: on or off, where, how many to keep |
 | `ZBXCTL_TZ` | the time zone times are shown in (default UTC) |
 | `ZBXCTL_ALLOW_UNSUPPORTED` | try a Zabbix server older than 7.4 |

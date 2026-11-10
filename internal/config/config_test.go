@@ -230,3 +230,37 @@ func TestStateKeepDefaultsToTwoHundredAndEnvOverridesFile(t *testing.T) {
 		t.Fatalf("an unreadable value must be ignored: %d", ctx.KeepStates())
 	}
 }
+
+func TestModeDefaultsToDryRunAndEnvOverridesFile(t *testing.T) {
+	if (&Context{}).ApplyByDefault() || (&Context{Mode: "dry-run"}).ApplyByDefault() {
+		t.Fatal("the default is dry-run")
+	}
+	if !(&Context{Mode: "apply"}).ApplyByDefault() || !(&Context{Mode: " Apply "}).ApplyByDefault() {
+		t.Fatal("mode: apply applies by default")
+	}
+	for _, ok := range []string{"", "dry-run", "apply", "APPLY"} {
+		if err := (&Context{Mode: ok}).ValidateMode(); err != nil {
+			t.Errorf("%q must be valid: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"yes", "true", "force", "apply!"} {
+		if err := (&Context{Mode: bad}).ValidateMode(); err == nil {
+			t.Errorf("%q must be rejected", bad)
+		}
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := home + "/.config/zbxctl"
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(dir+"/config.yaml", []byte("current_context: lab\ncontexts:\n  lab:\n    url: http://z\n    api_token: x\n    mode: apply\n"), 0o600)
+	t.Setenv("ZBXCTL_MODE", "")
+	_, ctx, err := LoadConfig("")
+	if err != nil || !ctx.ApplyByDefault() {
+		t.Fatalf("file: %+v %v", ctx, err)
+	}
+	t.Setenv("ZBXCTL_MODE", "dry-run")
+	_, ctx, _ = LoadConfig("")
+	if ctx.ApplyByDefault() {
+		t.Fatal("the environment must override the file")
+	}
+}

@@ -33,6 +33,9 @@ func newClient() (*api.Client, output.Format, *config.Context, error) {
 		f := false
 		ctx.TLSVerify = &f
 	}
+	if err := applyModeSettings(ctx); err != nil {
+		return nil, outFmt, nil, err
+	}
 	c, err := api.NewClient(context.Background(), ctx)
 	if err != nil {
 		return nil, outFmt, nil, err
@@ -1958,6 +1961,24 @@ func checkServerVersion(c *api.Client) error {
 	if newer && !versionWarned {
 		versionWarned = true
 		fmt.Fprintf(os.Stderr, "warning: Zabbix %s is newer than %s, the newest version zbxctl has been tested against; some results may differ\n", c.Version, api.Tested)
+	}
+	return nil
+}
+
+// applyModeSettings decides whether changes are applied when the command line
+// does not say. Priority: --apply / --dry-run, then ZBXCTL_MODE, then the
+// context's mode, then dry-run. Commands that delete local audit files
+// (state prune) do not use this: they always need an explicit --apply.
+func applyModeSettings(ctx *config.Context) error {
+	if err := ctx.ValidateMode(); err != nil {
+		return &usageError{err.Error()}
+	}
+	if flagDryRun {
+		flagApply = false
+		return nil
+	}
+	if !flagApply && ctx.ApplyByDefault() {
+		flagApply = true
 	}
 	return nil
 }

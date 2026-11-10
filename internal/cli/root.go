@@ -21,6 +21,7 @@ var (
 	flagContext          string
 	flagYes              bool
 	flagApply            bool
+	flagDryRun           bool
 	flagFilter           []string
 	flagField            string
 	flagInsecure         bool
@@ -69,6 +70,9 @@ Single static binary. Machine-readable output. Structured errors.`,
 			flagApply = true // --yes is an alias for --apply
 		}
 		output.Command = strings.TrimPrefix(cmd.CommandPath(), "zbxctl ")
+		if flagApply && flagDryRun {
+			return &usageError{"--apply and --dry-run contradict each other: use one"}
+		}
 		return nil
 	},
 }
@@ -177,6 +181,8 @@ func init() {
 		string(output.DefaultFormat()), "output format: json|jsonl|table|csv")
 	rootCmd.PersistentFlags().StringVarP(&flagContext, "context", "c",
 		"", "override current context")
+	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false,
+		"only show what a change would do, even if the context's mode is apply")
 	rootCmd.PersistentFlags().BoolVar(&flagApply, "apply", false,
 		"execute state-changing commands (default is a dry run that changes nothing)")
 	rootCmd.PersistentFlags().BoolVarP(&flagYes, "yes", "y",

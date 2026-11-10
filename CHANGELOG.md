@@ -41,6 +41,8 @@ Zabbix versions (8.x) is worked out.
 - The before-state files that `--apply` saves are now pruned automatically: zbxctl keeps the newest **200** and
   deletes older ones as new ones are written, saying so on stderr. Configure it with `state_keep` in the config,
   `ZBXCTL_STATE_KEEP` or `--state-keep`; `0` keeps everything. `state prune --keep N` does the same by hand.
+- A connection can apply changes by default: `mode: apply` in the config or `ZBXCTL_MODE=apply`. `--dry-run` previews a
+  single command. The MCP server ignores this setting, and `state prune` always needs an explicit `--apply`.
 
 ## [0.1.0]
 

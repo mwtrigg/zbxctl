@@ -1168,6 +1168,7 @@ func globalFlags() []FlagSchema {
 		{Name: "retries", Type: "int", Description: "Retries of read-only calls after a connection error or 502/503/504 (default 2; writes are never retried).", Required: false, Default: 2},
 		{Name: "tz", Type: "string", Description: "Time zone for displayed times: an IANA name like America/New_York, or local. Default UTC.", Required: false, Default: ""},
 		{Name: "insecure", Type: "bool", Description: "Disable TLS verification (emits a warning).", Required: false, Default: false},
+		{Name: "dry-run", Type: "bool", Description: "Only show what a change would do, even if the context's mode is apply.", Required: false, Default: false},
 	}
 }
 

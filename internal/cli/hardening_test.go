@@ -354,3 +354,46 @@ func TestNoURLIsAUsageError(t *testing.T) {
 		t.Fatalf("an unconfigured URL is exit 5, got %v", err)
 	}
 }
+
+// mode: apply (ZBXCTL_MODE) must work with every write path, including the
+// single-object ones, and --dry-run must still preview.
+func TestModeApplyAppliesSingleObjectWritesAndDryRunPreviews(t *testing.T) {
+	handler := func(call rpcCall) fakeReply {
+		switch call.Method {
+		case "hostgroup.get":
+			return fakeReply{Result: "[]"}
+		case "hostgroup.create":
+			return fakeReply{Result: `{"groupids":["50"]}`}
+		}
+		return fakeReply{}
+	}
+	t.Setenv("ZBXCTL_MODE", "apply")
+	f := &fakeZabbix{Handler: handler}
+	if _, err := runFake(t, f, "create", "group", "--name", "G1"); err != nil || len(f.called("hostgroup.create")) != 1 {
+		t.Fatalf("mode apply must apply without --apply: %v", err)
+	}
+	if got := xdgStateFiles(t); len(got) != 1 {
+		t.Fatalf("and still save a before-state: %v", got)
+	}
+	f = &fakeZabbix{Handler: handler}
+	if _, err := runFake(t, f, "create", "group", "--name", "G2", "--dry-run"); err != nil || len(f.called("hostgroup.create")) != 0 {
+		t.Fatalf("--dry-run must preview under mode apply: %v", err)
+	}
+}
+
+func TestMCPChildAllowsTheDryRunTheServerPasses(t *testing.T) {
+	t.Setenv("ZBXCTL_FROM_MCP", "1")
+	t.Setenv("ZBXCTL_MODE", "dry-run")
+	f := &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		if c.Method == "hostgroup.get" {
+			return fakeReply{Result: "[]"}
+		}
+		return fakeReply{}
+	}}
+	if _, err := runFake(t, f, "create", "group", "--name", "G", "--dry-run", "--output", "json"); err != nil || len(f.called("hostgroup.create")) != 0 {
+		t.Fatalf("the child must accept --dry-run and write nothing: %v", err)
+	}
+	if err := runChildArgs("create", "group", "--name", "G", "--no-state"); err == nil || !strings.Contains(err.Error(), "over MCP") {
+		t.Fatalf("--no-state must still be refused: %v", err)
+	}
+}
