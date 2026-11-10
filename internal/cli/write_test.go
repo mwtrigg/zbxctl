@@ -386,5 +386,17 @@ func TestMaintenanceCreateDefaultsToNowAndAcceptsHumanDurations(t *testing.T) {
 	_, _ = runCLI(t, "maintenance", "create", "--name", "w", "--host", "web1", "--duration", "soon")
 	if lastErr == nil {
 		t.Fatal("a bad duration must be refused")
+func TestDeleteGroupGuards(t *testing.T) {
+	defer resetBulkFlags()
+	defer func() { extraResults = nil; groupAllow = false }()
+	extraResults = map[string]string{"hostgroup.get": `[{"groupid":"5","name":"G","hosts":"3"}]`, "hostgroup.delete": `{"groupids":["5"]}`}
+	_, methods := runCLI(t, "delete", "group", "G", "--apply", "--no-verify", "--state-dir", t.TempDir())
+	if lastErr == nil || slices.Contains(methods, "hostgroup.delete") {
+		t.Fatalf("a group with hosts must be refused: err=%v", lastErr)
+	}
+	extraResults["hostgroup.get"] = `[{"groupid":"7","name":"Empty","hosts":"0"}]`
+	_, methods = runCLI(t, "delete", "group", "Empty", "--apply", "--no-verify", "--state-dir", t.TempDir())
+	if lastErr != nil || !slices.Contains(methods, "hostgroup.delete") {
+		t.Fatalf("an empty group may be deleted: err=%v methods=%v", lastErr, methods)
 	}
 }
