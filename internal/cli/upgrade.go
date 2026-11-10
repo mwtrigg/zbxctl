@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -18,7 +16,7 @@ import (
 	"github.com/mwtrigg/zbxctl/internal/version"
 )
 
-const githubReleaseAPI = "https://api.github.com/repos/mwtrigg/zbxctl/releases/latest"
+var githubReleaseAPI = "https://api.github.com/repos/mwtrigg/zbxctl/releases/latest"
 
 type githubRelease struct {
 	TagName string        `json:"tag_name"`
@@ -70,7 +68,7 @@ func runVersion(_ *cobra.Command, _ []string) error {
 func runUpgrade(_ *cobra.Command, _ []string) error {
 	outFmt := output.Format(flagOutput)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	rel, err := fetchLatestRelease(ctx)
@@ -118,51 +116,11 @@ func runUpgrade(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	wantName := fmt.Sprintf("zbxctl_%s_%s", runtime.GOOS, runtime.GOARCH)
-	var downloadURL string
-	for _, a := range rel.Assets {
-		// match bare name or with .tar.gz suffix
-		bare := strings.TrimSuffix(strings.TrimSuffix(a.Name, ".gz"), ".tar")
-		if bare == wantName {
-			downloadURL = a.BrowserDownloadURL
-			break
-		}
-	}
-	if downloadURL == "" {
-		return cliPrintErr(outFmt, fmt.Sprintf("no asset found for %s/%s", runtime.GOOS, runtime.GOARCH), output.ExitError)
-	}
-
-	execPath, err := os.Executable()
-	if err != nil {
-		return cliPrintErr(outFmt, "could not determine binary path: "+err.Error(), output.ExitError)
-	}
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return cliPrintErr(outFmt, "could not resolve symlink: "+err.Error(), output.ExitError)
-	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(execPath), ".zbxctl-upgrade-*")
-	if err != nil {
-		return cliPrintErr(outFmt, "could not create temp file: "+err.Error(), output.ExitError)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-
 	if outFmt == output.FormatTable {
-		fmt.Printf("downloading %s...\n", wantName)
+		fmt.Printf("downloading and verifying %s...\n", archiveName(runtime.GOOS, runtime.GOARCH))
 	}
-
-	if err := downloadAsset(ctx, downloadURL, tmp); err != nil {
-		tmp.Close()
-		return cliPrintErr(outFmt, "download failed: "+err.Error(), output.ExitError)
-	}
-	tmp.Close()
-
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return cliPrintErr(outFmt, "could not set permissions: "+err.Error(), output.ExitError)
-	}
-	if err := os.Rename(tmpPath, execPath); err != nil {
-		return cliPrintErr(outFmt, "could not replace binary: "+err.Error(), output.ExitError)
+	if err := installLatest(ctx, rel); err != nil {
+		return cliPrintErr(outFmt, "upgrade failed: "+err.Error(), output.ExitError)
 	}
 
 	if outFmt == output.FormatTable {
