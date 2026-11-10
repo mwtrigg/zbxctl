@@ -29,7 +29,7 @@ role and user group rights of the token's user. Recommended:
 
 - a separate token per use, and for agents the **User** role with read-only group rights;
 - `permissions: readonly` (the default when nothing is set) on contexts an agent uses, and
-  `zbxctl auth check` to see whether that tier is stronger than what the token's role enforces;
+  `zbxctl auth check` to see whether that tier is stronger than what the token's role and its rules enforce (it exits 8 when it is);
 - no `allowed_scripts` and no `api_call_admin` on contexts an agent can use;
 - the config file mode 0600 and the state directory owned by you.
 

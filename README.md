@@ -80,8 +80,10 @@ and call the Zabbix API with the same token. So:
 - **Give agents their own token**, of a user with the **User** role whose user groups have **read-only**
   access to the host groups it should see. Keep Admin and Super admin tokens out of any context an agent can
   use. In the config, label that context `permissions: readonly`.
-- **`zbxctl auth check`** reads the token's role (it changes nothing) and warns when the tier you declared
-  is stronger than what Zabbix enforces, for example a `readonly` context whose token is a Super admin.
+- **`zbxctl auth check`** reads the token's role and its rules (it changes nothing) and exits 8, with the
+  reasons, when the tier you declared is stronger than what Zabbix enforces: for a `readonly` tier, a role that
+  can change the configuration (Admin, Super admin), run scripts, acknowledge, close, suppress or comment on
+  problems, or call API methods other than reads. It does not read user group rights.
 
 | Zabbix role of the token's user | What Zabbix lets it do | Matching zbxctl tier |
 |---|---|---|

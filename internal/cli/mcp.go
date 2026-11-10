@@ -398,8 +398,8 @@ Example client entry (Claude Code, Claude Desktop and others use this shape):
 		if err != nil {
 			return cliFail(output.Format(flagOutput), err)
 		}
-		if name == "" && os.Getenv("ZBXCTL_URL") == "" {
-			return cliFail(output.Format(flagOutput), &usageError{"mcp needs a connection to pin: name a context (zbxctl -c <name> mcp, or ZBXCTL_CONTEXT, or current_context in the config) or set ZBXCTL_URL"})
+		if name == "" {
+			return cliFail(output.Format(flagOutput), &usageError{"mcp needs a named context to pin: use zbxctl -c <name> mcp, ZBXCTL_CONTEXT, or current_context in the config. A server without one follows whatever the config says later (a 'context use' elsewhere would move it to another Zabbix)"})
 		}
 		mcpPinnedContext = name
 		return serveMCP(os.Stdin, os.Stdout, mcpAllowWrites)

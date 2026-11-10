@@ -216,7 +216,15 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 		if err := ValidateTier(v); err != nil {
 			return nil, nil, fmt.Errorf("ZBXCTL_PERMISSIONS: %w", err)
 		}
-		ctx.Permissions = v
+		// The environment can lower a tier but never raise one: an operator who once
+		// exported ZBXCTL_PERMISSIONS=write must not raise a context written readonly.
+		cur := normalizeTier(ctx.Permissions)
+		switch {
+		case cur == "" || permLevel(normalizeTier(v)) < permLevel(cur):
+			ctx.Permissions = v
+		case permLevel(normalizeTier(v)) > permLevel(cur):
+			fmt.Fprintf(os.Stderr, "warning: ZBXCTL_PERMISSIONS=%s is ignored: context %q is %s, and the environment can lower a tier but never raise it\n", v, ctxName, cur)
+		}
 	}
 	if v := os.Getenv("ZBXCTL_URL"); v != "" {
 		ctx.URL = v

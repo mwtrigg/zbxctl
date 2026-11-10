@@ -66,6 +66,11 @@ func init() {
 			if itType == "calculated" && itParams == "" {
 				return cliPrintErr(outFmt, "a calculated item needs --formula", output.ExitUsage)
 			}
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(itKey)), "system.run[") && !ctx.APICallAdmin {
+				// A system.run key runs a command on every host whose agent allows it. api call
+				// refuses item writes for the same reason; the context has to say it means it.
+				return cliPrintErr(outFmt, "an item with a system.run[...] key runs commands on the monitored hosts; set api_call_admin: true on this context if you mean it", output.ExitPermission)
+			}
 			h, err := resources.GetHost(c, itHost)
 			if err != nil {
 				return cliFail(outFmt, err)

@@ -26,8 +26,9 @@ heading when a release is cut.
   previews a single command. The MCP server ignores this setting.
 - `api call` as an escape hatch (reads with secrets masked; admin-class writes need `api_call_admin`),
   `llm capabilities` for agents, and `zbxctl mcp`, an MCP server.
-- `zbxctl auth check` compares the permission tier you declared with the role of the token's user in Zabbix (no
-  change is made) and warns when the tier is stronger than what the server enforces.
+- `zbxctl auth check` compares the permission tier you declared with the role and rules of the token's user in
+  Zabbix (no change is made) and exits 8 with the reasons when the tier is stronger than what the server enforces
+  (configuration changes, script execution, problem actions, API methods beyond reads for a readonly tier).
 - Detection of the Zabbix version (7.4 and newer are supported) with an optional per-connection pin.
 - Signed releases for Linux, macOS and Windows on amd64 and arm64, with checksums, SBOMs and a verifying
   `zbxctl upgrade` (the version is part of the signed archive name, so an old release cannot pass as a new one).

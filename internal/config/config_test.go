@@ -313,3 +313,31 @@ func TestActiveContextName(t *testing.T) {
 		t.Fatal("an unknown name is an error")
 	}
 }
+
+func TestZBXCTLPermissionsOnlyLowersAConfiguredTier(t *testing.T) {
+	cfg := func(tier string) {
+		writeConfig(t, "current_context: c\ncontexts:\n  c:\n    url: https://zbx.example.com\n    permissions: "+tier+"\n")
+	}
+	canWrite := func() bool {
+		var ctx *Context
+		captureStderr(t, func() { _, ctx, _ = LoadConfig("") })
+		return ctx.CheckPermission("write") == nil
+	}
+	cfg("readonly")
+	t.Setenv("ZBXCTL_PERMISSIONS", "write")
+	var warn string
+	warn = captureStderr(t, func() { _, _, _ = LoadConfig("") })
+	if canWrite() || !strings.Contains(warn, "never raise") {
+		t.Fatalf("the environment must not raise a readonly context (warn %q)", warn)
+	}
+	cfg("write")
+	t.Setenv("ZBXCTL_PERMISSIONS", "readonly")
+	if canWrite() {
+		t.Fatal("the environment may lower a write context")
+	}
+	cfg("operator")
+	t.Setenv("ZBXCTL_PERMISSIONS", "")
+	if canWrite() {
+		t.Fatal("operator cannot write")
+	}
+}

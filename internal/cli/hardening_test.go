@@ -511,14 +511,20 @@ func TestAPICallRefusesMoreCodeRunningCreators(t *testing.T) {
 	}
 }
 
-func TestAuthCheckWarnsWhenTheTierIsStrongerThanTheRole(t *testing.T) {
-	roleReply := func(roleType, name string) func(rpcCall) fakeReply {
+func TestAuthCheckComparesTheTierWithTheRoleAndItsRules(t *testing.T) {
+	// rules of a stock User role: scripts and problem actions allowed by default, API unrestricted
+	stockUser := `{"actions.default_access":"1","api.access":"1","api.mode":"0","api":[],"actions":[]}`
+	// a custom agent role: nothing allowed by default, API allow list of reads
+	agentRole := `{"actions.default_access":"0","api.access":"1","api.mode":"1","api":["*.get","apiinfo.version"],"actions":[]}`
+	handler := func(roleType, rules string) func(rpcCall) fakeReply {
 		return func(c rpcCall) fakeReply {
 			switch c.Method {
 			case "user.checkAuthentication":
 				return fakeReply{Result: `{"userid":"7","username":"agent"}`}
 			case "user.get":
-				return fakeReply{Result: `[{"userid":"7","username":"agent","role":{"roleid":"3","name":"` + name + `","type":"` + roleType + `"}}]`}
+				return fakeReply{Result: `[{"userid":"7","username":"agent","role":{"roleid":"3","name":"R","type":"` + roleType + `"}}]`}
+			case "role.get":
+				return fakeReply{Result: `[{"roleid":"3","rules":` + rules + `}]`}
 			}
 			return fakeReply{}
 		}
@@ -526,30 +532,101 @@ func TestAuthCheckWarnsWhenTheTierIsStrongerThanTheRole(t *testing.T) {
 	type row struct {
 		Data []map[string]any `json:"data"`
 	}
-	run := func(f *fakeZabbix) map[string]any {
+	run := func(f *fakeZabbix) (map[string]any, error) {
 		out, err := runFake(t, f, "auth", "check")
-		if err != nil {
-			t.Fatal(err)
-		}
 		var r row
-		if err := json.Unmarshal([]byte(out), &r); err != nil || len(r.Data) != 1 {
-			t.Fatalf("%v\n%s", err, out)
+		if jerr := json.Unmarshal([]byte(out), &r); jerr != nil || len(r.Data) != 1 {
+			t.Fatalf("%v\n%s", jerr, out)
 		}
-		return r.Data[0]
+		return r.Data[0], err
 	}
-	// a readonly context whose token belongs to a Super admin: warn
-	d := run(&fakeZabbix{Handler: roleReply("3", "Super admin role"), Context: "permissions: readonly"})
-	if d["ok"] != false || !strings.Contains(d["note"].(string), "enforced only by zbxctl") || d["can_change_configuration"] != true {
-		t.Fatalf("must warn: %v", d)
+	// readonly + Super admin: too strong, and the exit code says so
+	d, err := run(&fakeZabbix{Handler: handler("3", stockUser), Context: "permissions: readonly"})
+	if d["ok"] != false || exitOf(err) != 8 || !strings.Contains(d["note"].(string), "can change the configuration") {
+		t.Fatalf("must warn and exit 8: %v %v", d, err)
 	}
-	// a readonly context whose token is a User role: fine
-	d = run(&fakeZabbix{Handler: roleReply("1", "User role"), Context: "permissions: readonly"})
-	if d["ok"] != true || d["note"] != "" {
-		t.Fatalf("a user role under readonly is what we want: %v", d)
+	// readonly + a stock User role: scripts, problem actions and an unrestricted API all count
+	d, err = run(&fakeZabbix{Handler: handler("1", stockUser), Context: "permissions: readonly"})
+	note, _ := d["note"].(string)
+	if d["ok"] != false || exitOf(err) != 8 || !strings.Contains(note, "execute scripts") || !strings.Contains(note, "problems") || !strings.Contains(note, "read methods") {
+		t.Fatalf("a stock user role is not read-only: %v %v", d, err)
 	}
-	// a write context with a user role: ok, with a note that Zabbix will refuse most writes
-	d = run(&fakeZabbix{Handler: roleReply("1", "User role"), Context: "permissions: write"})
-	if d["ok"] != true || !strings.Contains(d["note"].(string), "cannot change the configuration") {
-		t.Fatalf("%v", d)
+	// readonly + the custom agent role: fine
+	d, err = run(&fakeZabbix{Handler: handler("1", agentRole), Context: "permissions: readonly"})
+	if d["ok"] != true || err != nil || d["note"] != "" {
+		t.Fatalf("the agent role is what we want: %v %v", d, err)
+	}
+	// operator may run scripts and act on problems; only a configuration-capable role is too strong
+	if d, err = run(&fakeZabbix{Handler: handler("1", stockUser), Context: "permissions: operator"}); d["ok"] != true || err != nil {
+		t.Fatalf("operator + user role is fine: %v %v", d, err)
+	}
+	if d, err = run(&fakeZabbix{Handler: handler("2", stockUser), Context: "permissions: operator"}); d["ok"] != false || exitOf(err) != 8 {
+		t.Fatalf("operator + admin role is too strong: %v %v", d, err)
+	}
+	// write with a user role: ok, with a note
+	d, err = run(&fakeZabbix{Handler: handler("1", stockUser), Context: "permissions: write"})
+	if d["ok"] != true || err != nil || !strings.Contains(d["note"].(string), "cannot change the configuration") {
+		t.Fatalf("%v %v", d, err)
+	}
+	// rules that cannot be read: a readonly tier cannot be called ok
+	f := &fakeZabbix{Context: "permissions: readonly", Handler: func(c rpcCall) fakeReply {
+		if c.Method == "role.get" {
+			return fakeReply{RPCError: "No permissions"}
+		}
+		return handler("1", agentRole)(c)
+	}}
+	if d, err = run(f); d["ok"] != false || exitOf(err) != 8 {
+		t.Fatalf("unreadable rules must not read as ok: %v %v", d, err)
+	}
+}
+
+// R3-2 (correctness): the environment can lower a tier, never raise it.
+func TestEnvironmentCannotRaiseAConfiguredTier(t *testing.T) {
+	f := &fakeZabbix{Handler: hostGetter, Context: "permissions: readonly"}
+	t.Setenv("ZBXCTL_PERMISSIONS", "write")
+	// runFake clears the variable when the context sets a tier, so run through the child helper path
+	f.Context = ""
+	writeCfg := func() {
+		dir := t.TempDir()
+		t.Setenv("HOME", dir)
+		_ = os.MkdirAll(dir+"/.config/zbxctl", 0o700)
+		_ = os.WriteFile(dir+"/.config/zbxctl/config.yaml", []byte("current_context: agent\ncontexts:\n  agent:\n    url: https://zbx.example.com\n    permissions: readonly\n"), 0o600)
+		t.Setenv("ZBXCTL_API_TOKEN", "t")
+		t.Setenv("ZBXCTL_CONTEXT", "")
+		t.Setenv("ZBXCTL_URL", "")
+	}
+	writeCfg()
+	t.Setenv("ZBXCTL_PERMISSIONS", "write")
+	if err := runChildArgs("delete", "host", "web1", "--apply"); exitOf(err) != 8 {
+		t.Fatalf("a readonly context must stay readonly despite ZBXCTL_PERMISSIONS=write: %v", err)
+	}
+}
+
+func TestCreateItemRefusesSystemRunKeysUnlessTheContextAllowsIt(t *testing.T) {
+	handler := func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "host.get":
+			return fakeReply{Result: `[{"hostid":"10","host":"web1","name":"web1","status":"0"}]`}
+		case "hostinterface.get":
+			return fakeReply{Result: `[{"interfaceid":"5","type":"1","main":"1"}]`}
+		case "item.create":
+			return fakeReply{Result: `{"itemids":["1"]}`}
+		}
+		return fakeReply{}
+	}
+	args := []string{"create", "item", "--host", "web1", "--name", "x", "--key", "system.run[id]", "--type", "agent", "--value-type", "text", "--delay", "1m", "--apply"}
+	f := &fakeZabbix{Handler: handler}
+	if _, err := runFake(t, f, args...); exitOf(err) != 8 || len(f.called("item.create")) != 0 {
+		t.Fatalf("a system.run item must be refused: %v", err)
+	}
+	f = &fakeZabbix{Handler: handler, Context: "permissions: write\napi_call_admin: true"}
+	if _, err := runFake(t, f, args...); err != nil || len(f.called("item.create")) != 1 {
+		t.Fatalf("api_call_admin allows it: %v", err)
+	}
+	ok := append(append([]string{}, args[:7]...), "agent.ping", "--type", "agent", "--value-type", "uint", "--delay", "1m", "--apply")
+	ok = []string{"create", "item", "--host", "web1", "--name", "x", "--key", "agent.ping", "--type", "agent", "--value-type", "uint", "--delay", "1m", "--apply"}
+	f = &fakeZabbix{Handler: handler}
+	if _, err := runFake(t, f, ok...); err != nil || len(f.called("item.create")) != 1 {
+		t.Fatalf("an ordinary key is fine: %v", err)
 	}
 }
