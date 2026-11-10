@@ -107,7 +107,10 @@ func classify(err error) int {
 	var rpc *api.RPCError
 	var fe *output.FieldError
 	var uv *api.UnsupportedVersionError
+	var uo *outcomeUnknownError
 	switch {
+	case errors.As(err, &uo):
+		return output.ExitUnknown
 	case errors.As(err, &uv):
 		return output.ExitVersion
 	case errors.As(err, &fe):

@@ -253,6 +253,7 @@ JSON is the default; `-o jsonl` gives one object per line, `-o csv` a header plu
 | 4 | `connection` | cannot reach Zabbix |
 | 5 | `usage` | invalid flag or argument |
 | 6 | `unsupported_version` | the Zabbix server is older than 7.4 |
+| 7 | `unknown_outcome` | a write was sent but a timeout or a 502/503/504 hid the answer: it may have been executed, so look before retrying (the before-state file is kept and marks the target `unknown`) |
 
 ## Zabbix versions
 

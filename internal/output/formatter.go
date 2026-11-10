@@ -21,6 +21,7 @@ const (
 	ExitConnect   = 4 // cannot reach Zabbix
 	ExitUsage     = 5 // invalid arguments or flags
 	ExitVersion   = 6 // the Zabbix server is older than zbxctl supports
+	ExitUnknown   = 7 // a write was sent but its outcome is not known (timeout, 502/504): check before retrying
 )
 
 // Raw includes the raw API values (*_raw, *_unix) next to the readable ones.
@@ -46,6 +47,8 @@ func KindFor(code int) string {
 		return "usage"
 	case ExitVersion:
 		return "unsupported_version"
+	case ExitUnknown:
+		return "unknown_outcome"
 	default:
 		return "error"
 	}
