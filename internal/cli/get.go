@@ -1242,6 +1242,10 @@ var (
 	flagHistorySince       string
 	flagHistoryUntil       string
 	flagHistoryLimit       int
+	flagHistoryAll         bool
+	flagHistoryMaxRows     int
+	flagHistoryStep        string
+	flagHistoryGapsOver    string
 	flagHistoryAroundEvent string
 	flagHistoryWindow      string
 )
@@ -1260,6 +1264,10 @@ func init() {
 	f.StringVar(&flagHistorySince, "since", "", "start time: unix timestamp, RFC3339, or YYYY-MM-DD")
 	f.StringVar(&flagHistoryUntil, "until", "", "end time: unix timestamp, RFC3339, or YYYY-MM-DD")
 	f.IntVar(&flagHistoryLimit, "limit", 0, "max results")
+	f.BoolVar(&flagHistoryAll, "all", false, "page through the whole window instead of stopping at --limit")
+	f.IntVar(&flagHistoryMaxRows, "max-rows", 0, "with --all: safety cap on rows (default 200000)")
+	f.StringVar(&flagHistoryStep, "step", "", "downsample: keep the last value of each bucket of this size per item (e.g. 5m, 1h)")
+	f.StringVar(&flagHistoryGapsOver, "gaps-over", "", "report gaps between consecutive samples longer than this (e.g. 10m) instead of the samples")
 	f.StringVar(&flagHistoryAroundEvent, "around-event", "", "anchor query to this event ID (resolves host, centers window on event clock)")
 	f.StringVar(&flagHistoryWindow, "window", "1h", "time window for --around-event: 30m|1h|2h|6h")
 	getCmd.AddCommand(historyCmd)
@@ -1353,6 +1361,23 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 		q.ItemIDs = []string{flagHistoryItem}
 		q.KeySearch = ""
 	}
+	q.All, q.MaxRows = flagHistoryAll, flagHistoryMaxRows
+	if q.All {
+		q.Limit = 0
+	}
+	var step, gapsOver time.Duration
+	if flagHistoryStep != "" {
+		if step, err = parseWindow(flagHistoryStep); err != nil || step <= 0 {
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --step %q: use a duration like 5m, 1h", flagHistoryStep), output.ExitUsage)
+		}
+	}
+	if flagHistoryGapsOver != "" {
+		if gapsOver, err = parseWindow(flagHistoryGapsOver); err != nil || gapsOver <= 0 {
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --gaps-over %q: use a duration like 10m", flagHistoryGapsOver), output.ExitUsage)
+		}
+		q.All = true // gap detection needs every sample
+		q.Limit = 0
+	}
 
 	records, err := resources.GetHistory(c, q)
 	if err != nil {
@@ -1361,6 +1386,12 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
 		return cliFail(outFmt, err)
+	}
+	if gapsOver > 0 {
+		return printHistoryGaps(outFmt, records, gapsOver, since, until)
+	}
+	if step > 0 {
+		records = downsampleHistory(records, step)
 	}
 
 	cols := []output.Column{

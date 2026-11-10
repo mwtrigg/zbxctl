@@ -99,3 +99,29 @@ func TestNormalizeProblemName(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func hrec(item string, clock int64) resources.HistoryRecord {
+	return resources.HistoryRecord{ItemID: item, Host: "h", Key: "k", ClockUnix: clock}
+}
+
+func TestDownsampleKeepsLastPerBucketPerItem(t *testing.T) {
+	recs := []resources.HistoryRecord{hrec("1", 0), hrec("1", 10), hrec("2", 11), hrec("1", 70), hrec("1", 75)}
+	got := downsampleHistory(recs, time.Minute)
+	if len(got) != 3 || got[0].ClockUnix != 10 || got[1].ItemID != "2" || got[2].ClockUnix != 75 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestFindHistoryGapsIncludingWindowEdges(t *testing.T) {
+	recs := []resources.HistoryRecord{hrec("1", 100), hrec("1", 160), hrec("1", 1000), hrec("1", 1060)}
+	gaps := findHistoryGaps(recs, 5*time.Minute, 0, 2000)
+	if len(gaps) != 2 || gaps[0].from != 160 || gaps[0].to != 1000 || gaps[1].edge != "end" || gaps[1].from != 1060 {
+		t.Fatalf("gaps: %+v", gaps)
+	}
+	if g := findHistoryGaps(recs, 5*time.Minute, 0, 1200); len(g) != 1 {
+		t.Fatalf("end gap should not count when it is shorter than the limit: %+v", g)
+	}
+	if g := findHistoryGaps(recs, time.Hour, 0, 0); len(g) != 0 {
+		t.Fatalf("no gaps over an hour: %+v", g)
+	}
+}

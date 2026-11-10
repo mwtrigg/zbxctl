@@ -116,7 +116,7 @@ func Execute() int {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagOutput, "output", "o",
-		string(output.DefaultFormat()), "output format: json|jsonl|table")
+		string(output.DefaultFormat()), "output format: json|jsonl|table|csv")
 	rootCmd.PersistentFlags().StringVarP(&flagContext, "context", "c",
 		"", "override current context")
 	rootCmd.PersistentFlags().BoolVar(&flagApply, "apply", false,

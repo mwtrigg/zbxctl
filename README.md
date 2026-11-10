@@ -39,7 +39,7 @@ Priority: CLI flag > `ZBXCTL_*` env var (`ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXC
 
 ## Output
 
-JSON is the default. `-o jsonl` gives one object per line, `-o table` is for humans.
+JSON is the default. `-o jsonl` gives one object per line, `-o csv` a header plus rows, `-o table` is for humans.
 
 ```json
 {"data": [ {...}, {...} ], "meta": {"count": 2, "command": "get hosts"}}
@@ -63,7 +63,7 @@ Errors go to stderr as `{"error": "...", "kind": "...", "code": N}`.
 Read (never change anything):
 
 ```
-get hosts | host | items | latestdata | history | interfaces
+get hosts | host | items | latestdata | history | trends | interfaces
 get triggers | problems | events | alerts
 get templates | template | groups | users | user | usergroups | scripts
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
@@ -99,6 +99,8 @@ zbxctl import template web-base.yaml --apply             # never deletes anythin
 Housekeeping: `version`, `upgrade [--check]`, `completion bash|zsh|fish|powershell`.
 
 `--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `get problems` triage flags: `--exclude-orphans` drops problems that can never recover (trigger, host or all items disabled), `--suppressed true|false` and `--maintenance` filter on suppression, `--group-by name` collapses the same alert across hosts into one row with a count, the hosts and the event IDs (handy for `acknowledge`).
+
+History and trends: `get history --all` pages through a whole window (no 100-row stop), `--step 5m` keeps one value per bucket, `--gaps-over 10m` lists the silences instead of the samples; `get trends` returns hourly min/avg/max of numeric items for baselines and long look-backs.
 
 `--host` and `--group` accept an ID or a name.
 

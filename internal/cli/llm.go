@@ -355,6 +355,20 @@ var capabilities = []CommandSchema{
 		},
 	},
 	{
+		Command:     "get trends",
+		Description: "Hourly min/avg/max of numeric items. Trends are kept far longer than history, so use them for baselines and long look-backs. Text and log items have no trends.",
+		Flags: append(globalFlags(),
+			FlagSchema{Name: "item", Type: "string", Description: "Item key pattern or numeric item ID.", Required: true, Default: ""},
+			FlagSchema{Name: "host", Type: "stringArray", Description: "Host name or ID (repeatable).", Required: false, Default: []string{}},
+			FlagSchema{Name: "group", Type: "stringArray", Description: "Host group name or ID (repeatable).", Required: false, Default: []string{}},
+			FlagSchema{Name: "since", Type: "string", Description: "Start: unix, RFC3339, YYYY-MM-DD or relative like 30d.", Required: false, Default: ""},
+			FlagSchema{Name: "until", Type: "string", Description: "End, same formats.", Required: false, Default: ""},
+			FlagSchema{Name: "limit", Type: "int", Description: "Max rows (default all in the window).", Required: false, Default: 0},
+		),
+		OutputFields: []string{"host", "hostid", "itemid", "key_", "clock", "num", "min", "avg", "max"},
+		Examples:     []string{"zbxctl get trends --host web-01 --item system.cpu.util --since 90d --output csv"},
+	},
+	{
 		Command:     "get history",
 		Description: "Fetch time-series metric history. Resolves items from hosts/groups by key pattern, then fetches history. Use --around-event to automatically anchor the time window to a specific event. Always includes host and hostid in output.",
 		Flags: append(globalFlags(),
@@ -364,6 +378,10 @@ var capabilities = []CommandSchema{
 			FlagSchema{Name: "since", Type: "string", Description: "Start time: unix timestamp, RFC3339, or YYYY-MM-DD.", Required: false, Default: ""},
 			FlagSchema{Name: "until", Type: "string", Description: "End time: unix timestamp, RFC3339, or YYYY-MM-DD.", Required: false, Default: ""},
 			FlagSchema{Name: "around-event", Type: "string", Description: "Event ID to anchor query: resolves host and centers window on event clock.", Required: false, Default: ""},
+			FlagSchema{Name: "all", Type: "bool", Description: "Page through the whole window instead of stopping at --limit.", Required: false, Default: false},
+			FlagSchema{Name: "max-rows", Type: "int", Description: "With --all: safety cap on rows (default 200000).", Required: false, Default: 0},
+			FlagSchema{Name: "step", Type: "string", Description: "Downsample: keep the last value of each bucket of this size per item (e.g. 5m, 1h).", Required: false, Default: ""},
+			FlagSchema{Name: "gaps-over", Type: "string", Description: "Report gaps between consecutive samples longer than this (e.g. 10m), including silence at the window edges, instead of the samples.", Required: false, Default: ""},
 			FlagSchema{Name: "window", Type: "string", Description: "Time window for --around-event: 30m|1h|2h|6h. Default: 1h (±30m).", Required: false, Default: "1h"},
 			FlagSchema{Name: "limit", Type: "int", Description: "Maximum results.", Required: false, Default: 0},
 		),
@@ -666,7 +684,7 @@ var capabilities = []CommandSchema{
 // globalFlags returns the flags that appear on every command.
 func globalFlags() []FlagSchema {
 	return []FlagSchema{
-		{Name: "output", Type: "string", Description: "Output format: json|jsonl|table. Default json.", Required: false, Default: "json"},
+		{Name: "output", Type: "string", Description: "Output format: json|jsonl|table|csv. Default json.", Required: false, Default: "json"},
 		{Name: "context", Type: "string", Description: "Override the active context.", Required: false, Default: ""},
 		{Name: "insecure", Type: "bool", Description: "Disable TLS verification (emits a warning).", Required: false, Default: false},
 	}
