@@ -6,48 +6,69 @@ import (
 	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
-// AcknowledgeParams holds parameters for acknowledging an event.
+// AckAction is what event.acknowledge should do to the problem.
+type AckAction string
+
+const (
+	ActionAcknowledge   AckAction = "acknowledge"
+	ActionUnacknowledge AckAction = "unacknowledge"
+	ActionSuppress      AckAction = "suppress"
+	ActionUnsuppress    AckAction = "unsuppress"
+)
+
+// AcknowledgeParams holds parameters for event.acknowledge.
 type AcknowledgeParams struct {
-	EventID string
-	Message string // optional
-	Close   bool   // if true, also close the problem (sets action bit for close)
+	EventID       string
+	Action        AckAction // default acknowledge
+	Message       string    // optional, added to the problem's history
+	Close         bool      // acknowledge only: also close the problem
+	Severity      int       // new severity 0-5; -1 = leave unchanged
+	SuppressUntil int64     // suppress only: Unix time; 0 = indefinitely
 }
 
-// AcknowledgeEvent acknowledges a Zabbix event.
-//
-// Zabbix event.acknowledge action bitmask:
-//
-//	1  — close problem
-//	2  — acknowledge
-//	4  — add message
-//	8  — change severity
-//	16 — unacknowledge
-//	32 — suppress
-//	64 — unsuppress
-//	128 — change cause
-func AcknowledgeEvent(c *api.Client, p AcknowledgeParams) error {
-	// Build action bitmask: always acknowledge (2).
-	action := 2
-	if p.Close {
-		action |= 1 // close problem
+// Action bits of event.acknowledge: 1 close, 2 acknowledge, 4 message,
+// 8 change severity, 16 unacknowledge, 32 suppress, 64 unsuppress.
+func (p AcknowledgeParams) actionMask() int {
+	mask := 0
+	switch p.Action {
+	case ActionUnacknowledge:
+		mask = 16
+	case ActionSuppress:
+		mask = 32
+	case ActionUnsuppress:
+		mask = 64
+	default:
+		mask = 2
+		if p.Close {
+			mask |= 1
+		}
 	}
 	if p.Message != "" {
-		action |= 4 // add message
+		mask |= 4
 	}
+	if p.Severity >= 0 {
+		mask |= 8
+	}
+	return mask
+}
 
+// AcknowledgeEvent applies an acknowledge-family action to an event.
+func AcknowledgeEvent(c *api.Client, p AcknowledgeParams) error {
 	params := map[string]any{
 		"eventids": []string{p.EventID},
-		"action":   action,
+		"action":   p.actionMask(),
 	}
 	if p.Message != "" {
 		params["message"] = p.Message
 	}
-
-	raw, err := c.Call("event.acknowledge", params)
-	if err != nil {
+	if p.Severity >= 0 {
+		params["severity"] = p.Severity
+	}
+	if p.Action == ActionSuppress {
+		params["suppress_until"] = p.SuppressUntil
+	}
+	if _, err := c.Call("event.acknowledge", params); err != nil {
 		return fmt.Errorf("event.acknowledge: %w", err)
 	}
-	// Response is {"eventids": [<int>, ...]} — just verify it's not an error.
-	_ = raw
 	return nil
 }

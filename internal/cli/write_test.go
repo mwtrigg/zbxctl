@@ -14,6 +14,9 @@ import (
 	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
+// lastErr is the error from the most recent runCLI.
+var lastErr error
+
 // runCLI executes the command tree against a fake Zabbix and returns stdout
 // and the list of API methods that were called.
 func runCLI(t *testing.T, args ...string) (string, []string) {
@@ -49,9 +52,7 @@ func runCLI(t *testing.T, args ...string) (string, []string) {
 	os.Stdout = old
 	var buf bytes.Buffer
 	_, _ = io.Copy(&buf, r)
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
+	lastErr = err
 	return buf.String(), methods
 }
 
@@ -121,5 +122,32 @@ func TestFilterLandsInFilterObject(t *testing.T) {
 	}
 	if buf.String() != "a\nb\n" {
 		t.Fatalf("--field output %q", buf.String())
+	}
+}
+
+func TestAcknowledgeFlagCombosAreUsageErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"acknowledge", "5", "--suppress", "--unsuppress"},
+		{"acknowledge", "5", "--unacknowledge", "--close"},
+		{"acknowledge", "5", "--until", "7d"},
+		{"acknowledge", "5", "--severity", "huge"},
+	} {
+		_, methods := runCLI(t, args...)
+		if lastErr == nil {
+			t.Errorf("%v: expected an error", args)
+		}
+		if slices.Contains(methods, "event.acknowledge") {
+			t.Errorf("%v reached event.acknowledge", args)
+		}
+	}
+	// flags are package-level; reset what these cases set
+	ackSuppress, ackUnsuppress, ackUnack, ackClose, ackSuppressUntil, ackSeverity = false, false, false, false, "", ""
+}
+
+func TestAcknowledgeSuppressAppliesWithUntil(t *testing.T) {
+	_, methods := runCLI(t, "acknowledge", "5", "--suppress", "--until", "7d", "--apply")
+	ackSuppress, ackSuppressUntil = false, ""
+	if lastErr != nil || !slices.Contains(methods, "event.acknowledge") {
+		t.Fatalf("err=%v methods=%v", lastErr, methods)
 	}
 }

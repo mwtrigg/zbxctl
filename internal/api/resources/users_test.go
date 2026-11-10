@@ -118,3 +118,31 @@ func TestCreateMaintenanceUsesHostAndGroupObjects(t *testing.T) {
 		t.Fatalf("hosts=%v groups=%v", h, g)
 	}
 }
+
+func TestAcknowledgeActionMasks(t *testing.T) {
+	cases := []struct {
+		name string
+		p    AcknowledgeParams
+		want float64
+	}{
+		{"ack", AcknowledgeParams{EventID: "1", Severity: -1}, 2},
+		{"ack close msg", AcknowledgeParams{EventID: "1", Close: true, Message: "m", Severity: -1}, 7},
+		{"unack", AcknowledgeParams{EventID: "1", Action: ActionUnacknowledge, Severity: -1}, 16},
+		{"suppress", AcknowledgeParams{EventID: "1", Action: ActionSuppress, SuppressUntil: 99, Severity: -1}, 32},
+		{"unsuppress msg", AcknowledgeParams{EventID: "1", Action: ActionUnsuppress, Message: "m", Severity: -1}, 68},
+		{"ack severity", AcknowledgeParams{EventID: "1", Severity: 4}, 10},
+	}
+	for _, c := range cases {
+		cl, calls := newFake(t, map[string]string{"event.acknowledge": `{"eventids":[1]}`})
+		if err := AcknowledgeEvent(cl, c.p); err != nil {
+			t.Fatal(err)
+		}
+		p := (*calls)[0]["params"].(map[string]any)
+		if p["action"].(float64) != c.want {
+			t.Errorf("%s: action %v want %v", c.name, p["action"], c.want)
+		}
+		if c.p.Action == ActionSuppress && p["suppress_until"].(float64) != 99 {
+			t.Errorf("%s: suppress_until %v", c.name, p["suppress_until"])
+		}
+	}
+}
