@@ -239,38 +239,69 @@ func LoadConfigFile() (*Config, error) {
 	return cfg, nil
 }
 
-// WriteCurrentContext persists current_context to the config file.
+// WriteCurrentContext persists current_context to the config file. It edits only
+// that one value in the YAML document, so comments, key order and every other
+// setting stay exactly as they were.
 func WriteCurrentContext(name string) error {
 	path, err := defaultConfigPath()
 	if err != nil {
 		return err
 	}
-
-	cfg := &Config{Contexts: make(map[string]Context)}
 	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("context %q not found in config: there is no config file", name)
+		}
 		return fmt.Errorf("reading config: %w", err)
 	}
-	if err == nil {
-		if err := parseConfig(data, cfg); err != nil {
-			return fmt.Errorf("parsing config: %w", err)
-		}
+	cfg := &Config{Contexts: make(map[string]Context)}
+	if err := parseConfig(data, cfg); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
 	}
-
 	if _, ok := cfg.Contexts[name]; !ok {
 		return fmt.Errorf("context %q not found in config", name)
 	}
 
-	cfg.CurrentContext = name
-
-	out, err := yaml.Marshal(cfg)
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return fmt.Errorf("parsing config: %w", err)
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		return fmt.Errorf("the config file is not a YAML mapping")
+	}
+	root := doc.Content[0]
+	set := false
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "current_context" {
+			root.Content[i+1].Kind, root.Content[i+1].Tag, root.Content[i+1].Value, root.Content[i+1].Style = yaml.ScalarNode, "!!str", name, 0
+			set = true
+		}
+	}
+	if !set {
+		root.Content = append([]*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "current_context"},
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: name},
+		}, root.Content...)
+	}
+	out, err := yaml.Marshal(&doc)
 	if err != nil {
 		return fmt.Errorf("marshalling config: %w", err)
 	}
-
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("creating config dir: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	if err != nil {
+		return fmt.Errorf("writing config: %w", err)
 	}
-
-	return os.WriteFile(path, out, 0o600)
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

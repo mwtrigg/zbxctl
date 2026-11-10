@@ -3,6 +3,9 @@ package cli
 import (
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -171,5 +174,27 @@ func TestMCPNeverOffersAPICallOrShowSecrets(t *testing.T) {
 		if _, ok := tool.flags["show-secrets"]; ok {
 			t.Fatalf("%s offers show-secrets", tool.Name)
 		}
+	}
+}
+
+func TestUpgradeAsksForYesWhenThereIsNoTerminal(t *testing.T) {
+	rel := `{"tag_name":"v99.0.0","assets":[]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(rel)) }))
+	defer srv.Close()
+	old := githubReleaseAPI
+	githubReleaseAPI = srv.URL
+	defer func() { githubReleaseAPI = old }()
+	clearFlagState()
+	defer clearFlagState()
+	oldIn := os.Stdin
+	devnull, _ := os.Open(os.DevNull)
+	os.Stdin = devnull
+	defer func() { os.Stdin = oldIn; devnull.Close() }()
+	rootCmd.SetArgs([]string{"upgrade"})
+	defer rootCmd.SetArgs(nil)
+	err := rootCmd.Execute()
+	var ce *cliErr
+	if !errors.As(err, &ce) || ce.code != 5 {
+		t.Fatalf("with no terminal and no --yes, upgrade must ask for --yes (exit 5), got %v", err)
 	}
 }

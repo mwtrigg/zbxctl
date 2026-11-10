@@ -60,10 +60,17 @@ func printable(s string) string {
 	return b.String()
 }
 
-// isTerminal reports whether f is an interactive terminal.
+// isTerminal reports whether f is an interactive terminal: a character device
+// other than /dev/null (which is one too, and is what a detached process gets).
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	if err != nil || fi.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(fi, null) {
+		return false
+	}
+	return true
 }
 
 // openConfirmationInput returns where the confirmation token is read from: the

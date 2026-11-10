@@ -135,3 +135,35 @@ func TestLoadConfigFailsClosed(t *testing.T) {
 }
 
 func contains(s, sub string) bool { return strings.Contains(s, sub) }
+
+func TestContextUseKeepsCommentsAndOtherSettings(t *testing.T) {
+	const src = `# my zbxctl config
+current_context: lab   # the default
+contexts:
+  lab:
+    url: https://lab.example.com
+    permissions: readonly   # agents get this one
+  prod:
+    url: https://prod.example.com
+`
+	writeConfig(t, src)
+	if err := WriteCurrentContext("prod"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(os.Getenv("HOME") + "/.config/zbxctl/config.yaml")
+	got := string(b)
+	for _, keep := range []string{"# my zbxctl config", "# agents get this one", "permissions: readonly", "url: https://lab.example.com"} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("%q was lost:\n%s", keep, got)
+		}
+	}
+	if !strings.Contains(got, "current_context: prod") || strings.Contains(got, "null") {
+		t.Fatalf("only current_context should change:\n%s", got)
+	}
+	if _, ctx, err := LoadConfig(""); err != nil || ctx.URL != "https://prod.example.com" {
+		t.Fatalf("the new context must be active: %v", err)
+	}
+	if err := WriteCurrentContext("nosuch"); err == nil {
+		t.Fatal("an unknown context must be refused")
+	}
+}

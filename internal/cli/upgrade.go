@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -102,16 +103,19 @@ func runUpgrade(_ *cobra.Command, _ []string) error {
 		return output.Print(outFmt, cols, []map[string]any{row})
 	}
 
-	if outFmt == output.FormatTable {
-		fmt.Printf("upgrading %s → %s\n", current, latest)
-	}
+	fmt.Fprintf(os.Stderr, "upgrading %s → %s\n", current, latest)
 
 	if !flagYes {
-		fmt.Printf("continue? [y/N] ")
+		// The question goes to stderr and stdout stays clean for the JSON result.
+		// With no terminal to answer it, ask for --yes instead of waiting on a pipe.
+		if !isTerminal(os.Stdin) {
+			return cliPrintErr(outFmt, "upgrade needs your confirmation: run it at a terminal, or pass --yes", output.ExitUsage)
+		}
+		fmt.Fprintf(os.Stderr, "continue? [y/N] ")
 		var answer string
 		fmt.Scanln(&answer)
 		if strings.ToLower(strings.TrimSpace(answer)) != "y" {
-			fmt.Println("cancelled")
+			fmt.Fprintln(os.Stderr, "cancelled")
 			return nil
 		}
 	}
@@ -119,9 +123,7 @@ func runUpgrade(_ *cobra.Command, _ []string) error {
 	if olderRelease(current, latest) {
 		return cliPrintErr(outFmt, fmt.Sprintf("the latest release (%s) is older than the version running (%s); not downgrading", latest, current), output.ExitError)
 	}
-	if outFmt == output.FormatTable {
-		fmt.Printf("downloading and verifying %s...\n", archiveName(latest, runtime.GOOS, runtime.GOARCH))
-	}
+	fmt.Fprintf(os.Stderr, "downloading and verifying %s...\n", archiveName(latest, runtime.GOOS, runtime.GOARCH))
 	if err := installLatest(ctx, rel); err != nil {
 		return cliPrintErr(outFmt, "upgrade failed: "+err.Error(), output.ExitError)
 	}
