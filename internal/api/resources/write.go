@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // EnableHost sets a host's status to monitored (status=0).

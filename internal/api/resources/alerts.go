@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // Alert represents a fired notification (alert) in Zabbix.
@@ -16,7 +16,7 @@ type Alert struct {
 	Clock       string `json:"clock"`
 	SendTo      string `json:"sendto"`
 	Subject     string `json:"subject"`
-	Status      string `json:"status"`      // "0"=not_sent, "1"=sent, "2"=failed, "3"=new
+	Status      string `json:"status"` // "0"=not_sent, "1"=sent, "2"=failed, "3"=new
 	Error       string `json:"error"`
 	UserID      string `json:"userid"`
 	MediaTypeID string `json:"mediatypeid"`
@@ -58,7 +58,7 @@ func GetAlerts(c *api.Client, f AlertFilter) ([]Alert, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("alert.get", params)
+	raw, err := c.CallList("alert.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("alert.get: %w", err)
 	}

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // Interface represents a network interface configured in Zabbix for a host.

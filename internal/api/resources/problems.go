@@ -4,19 +4,21 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // Problem represents an active or recently-resolved Zabbix problem.
 type Problem struct {
 	EventID         string `json:"eventid"`
-	ObjectID        string `json:"objectid"`     // triggerid
+	ObjectID        string `json:"objectid"` // triggerid
 	Name            string `json:"name"`
 	Severity        string `json:"severity"`     // 0–5
 	Acknowledged    string `json:"acknowledged"` // "0"|"1"
 	Clock           string `json:"clock"`        // Unix timestamp — when problem opened
 	RecoveryEventID string `json:"r_eventid"`    // "0" = still open; non-zero = resolved
 	RecoveryClock   string `json:"r_clock"`      // Unix timestamp — when resolved; "0" if open
+
+	Host string `json:"-"` // first host of the trigger, filled in by GetProblems
 }
 
 // ProblemFilter controls which problems are returned.
@@ -60,7 +62,7 @@ func GetProblems(c *api.Client, f ProblemFilter) ([]Problem, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("problem.get", params)
+	raw, err := c.CallList("problem.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("problem.get: %w", err)
 	}
@@ -68,5 +70,48 @@ func GetProblems(c *api.Client, f ProblemFilter) ([]Problem, error) {
 	if err := json.Unmarshal(raw, &problems); err != nil {
 		return nil, fmt.Errorf("parsing problems: %w", err)
 	}
-	return problems, nil
+	return problems, attachProblemHosts(c, problems)
+}
+
+// attachProblemHosts fills Problem.Host: problem.get returns only the trigger
+// ID, so the host name needs one extra trigger.get for the whole list.
+func attachProblemHosts(c *api.Client, problems []Problem) error {
+	if len(problems) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var ids []string
+	for _, p := range problems {
+		if !seen[p.ObjectID] {
+			seen[p.ObjectID] = true
+			ids = append(ids, p.ObjectID)
+		}
+	}
+	raw, err := c.Call("trigger.get", map[string]any{
+		"triggerids":  ids,
+		"output":      []string{"triggerid"},
+		"selectHosts": []string{"host"},
+	})
+	if err != nil {
+		return fmt.Errorf("trigger.get (problem hosts): %w", err)
+	}
+	var trigs []struct {
+		TriggerID string `json:"triggerid"`
+		Hosts     []struct {
+			Host string `json:"host"`
+		} `json:"hosts"`
+	}
+	if err := json.Unmarshal(raw, &trigs); err != nil {
+		return fmt.Errorf("parsing trigger hosts: %w", err)
+	}
+	byTrigger := map[string]string{}
+	for _, t := range trigs {
+		if len(t.Hosts) > 0 {
+			byTrigger[t.TriggerID] = t.Hosts[0].Host
+		}
+	}
+	for i := range problems {
+		problems[i].Host = byTrigger[problems[i].ObjectID]
+	}
+	return nil
 }

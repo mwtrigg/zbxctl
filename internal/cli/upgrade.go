@@ -14,8 +14,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/output"
-	"codeberg.org/mwtrigg/zbxctl/internal/version"
+	"github.com/mwtrigg/zbxctl/internal/output"
+	"github.com/mwtrigg/zbxctl/internal/version"
 )
 
 const githubReleaseAPI = "https://api.github.com/repos/mwtrigg/zbxctl/releases/latest"

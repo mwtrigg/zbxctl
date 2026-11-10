@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // Item represents a Zabbix item.
@@ -16,9 +16,9 @@ type Item struct {
 	Key       string `json:"key_"`
 	Type      string `json:"type"`
 	ValueType string `json:"value_type"`
-	Status    string `json:"status"`    // "0"=enabled, "1"=disabled
-	State     string `json:"state"`     // "0"=normal, "1"=not_supported
-	Error     string `json:"error"`     // non-empty when state=1
+	Status    string `json:"status"` // "0"=enabled, "1"=disabled
+	State     string `json:"state"`  // "0"=normal, "1"=not_supported
+	Error     string `json:"error"`  // non-empty when state=1
 	LastValue string `json:"lastvalue"`
 	LastClock string `json:"lastclock"` // Unix timestamp string; "0" = never collected
 	Units     string `json:"units"`
@@ -82,7 +82,7 @@ func GetItems(c *api.Client, f ItemFilter) ([]Item, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("item.get", params)
+	raw, err := c.CallList("item.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("item.get: %w", err)
 	}
@@ -129,11 +129,12 @@ func GetLatestData(c *api.Client, f ItemFilter) ([]Item, error) {
 	if f.KeySearch != "" {
 		params["search"] = map[string]any{"key_": f.KeySearch}
 	}
-	if f.Limit > 0 {
-		params["limit"] = f.Limit
-	}
+	// Only enabled items on enabled hosts can have collected data. The limit is
+	// applied after dropping never-collected items: sending it to item.get would
+	// let items without data use up the limit and hide the ones that have values.
+	params["monitored"] = true
 
-	raw, err := c.Call("item.get", params)
+	raw, err := c.CallList("item.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("item.get (latestdata): %w", err)
 	}
@@ -153,6 +154,9 @@ func GetLatestData(c *api.Client, f ItemFilter) ([]Item, error) {
 			item.Host = wh.Hosts[0].Host
 		}
 		out = append(out, item)
+		if f.Limit > 0 && len(out) >= f.Limit {
+			break
+		}
 	}
 	return out, nil
 }

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // UserGroup represents a Zabbix user group.
@@ -31,7 +31,7 @@ func GetUserGroups(c *api.Client, f UserGroupFilter) ([]UserGroup, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("usergroup.get", params)
+	raw, err := c.CallList("usergroup.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("usergroup.get: %w", err)
 	}

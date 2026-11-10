@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/cli"
+	"github.com/mwtrigg/zbxctl/internal/cli"
 )
 
 func main() {
