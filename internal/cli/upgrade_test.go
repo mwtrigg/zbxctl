@@ -2,6 +2,7 @@ package cli
 
 import (
 	"crypto/ed25519"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 
@@ -243,5 +244,33 @@ func TestNeverDowngrades(t *testing.T) {
 		if olderRelease(cur, c.latest) != c.older {
 			t.Errorf("current %s, latest %s: older=%v want %v", cur, c.latest, !c.older, c.older)
 		}
+	}
+}
+
+// The compiled-in release key must be the one the project published: the same key
+// as docs/release-signing-key.pub, with the fingerprint announced when it was made.
+func TestCompiledInReleaseKeyIsThePublishedOne(t *testing.T) {
+	const fingerprint = "SHA256:NRZYwmLfDrQSJnscVQ89vYFY5ue7QDmtuFBF+AuAGok"
+	if len(releaseKeys) != 1 {
+		t.Fatalf("expected exactly one release key, found %d", len(releaseKeys))
+	}
+	fields := strings.Fields(releaseKeys[0])
+	blob, err := base64.StdEncoding.DecodeString(fields[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(blob)
+	if got := "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:]); got != fingerprint {
+		t.Fatalf("compiled-in key has fingerprint %s, want %s", got, fingerprint)
+	}
+	if _, err := sshsig.ParsePublicKey(releaseKeys[0]); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.ReadFile("../../docs/release-signing-key.pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Fields(string(file))[1] != fields[1] {
+		t.Fatal("docs/release-signing-key.pub differs from the key compiled into the binary")
 	}
 }
