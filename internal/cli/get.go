@@ -1738,6 +1738,14 @@ var getInterfacesCmd = &cobra.Command{
 
 func init() { getCmd.AddCommand(getInterfacesCmd) }
 
+// maskIfSet hides a secret value but still shows that one is set.
+func maskIfSet(v string) string {
+	if v == "" || flagShowSecrets {
+		return v
+	}
+	return "******"
+}
+
 func runGetInterfaces(_ *cobra.Command, args []string) error {
 	c, outFmt, _, err := newClient()
 	if err != nil {
@@ -1789,7 +1797,7 @@ func runGetInterfaces(_ *cobra.Command, args []string) error {
 			"available_raw":     iface.AvailableRaw,
 			"error":             iface.Error,
 			"snmp_version":      iface.SNMPVersion,
-			"snmp_community":    iface.SNMPCommunity,
+			"snmp_community":    maskIfSet(iface.SNMPCommunity),
 			"snmp_securityname": iface.SNMPSecurityName,
 		}
 	}

@@ -31,7 +31,8 @@ var mcpAllowWrites bool
 var mcpHiddenFlags = map[string]bool{
 	"file": true, "dir": true, "id-file": true, "value-file": true, "password-file": true, "params-file": true, "state-dir": true,
 	"insecure": true, "allow-unsupported": true, "yes": true, "output": true, "raw": true, "no-state": true,
-	"context": true, // the server's own environment pins the context; an agent must not retarget it
+	"show-secrets": true,
+	"context":      true, // the server's own environment pins the context; an agent must not retarget it
 }
 
 // mcpChildDenied are the flags a child started by the MCP server refuses even
@@ -51,6 +52,7 @@ var mcpHiddenCommands = map[string]string{
 	"context use": "changes the config file",
 	"version":     "",
 	"state prune": "deletes local files",
+	"api call":    "full API access; use the dedicated tools",
 }
 
 type mcpTool struct {

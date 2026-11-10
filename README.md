@@ -76,7 +76,7 @@ zbxctl diagnose host web-01                         # one call: problems, events
 | `--apply` on a change | Saves a **before-state file** (what was done, what the target looked like before), applies the changes one by one, then re-reads each target to **verify** it. |
 | `delete user` | Refuses `Admin` and the user that owns the credentials in use. |
 | Secrets | Passwords and secret macro values come from a file or stdin, never a flag; secret values are never printed or saved. |
-| `run script` | Needs the script on an allowlist in your config and a one-time confirmation code. |
+| `run script` | Needs the operator tier, the script on an allowlist pinned to its command (`name@sha256:<hash>`, so an edited script is refused), and a one-time code typed at a terminal (read from `/dev/tty`, so it cannot be piped in). |
 
 Permission tiers cap what a connection may do: `permissions: readonly | operator | write` in the config.
 
@@ -139,8 +139,8 @@ tag host | untag host
 update host --proxy <name|none> | --proxy-group <name> | --add-template | --remove-template (unlink; items stay) | --clear-template (unlink and delete what it gave the host)
 export | diff | import   template | host
 delete template | delete lost items | delete lost triggers
-run script <name> --host <host>        (allowlist and confirmation code required)
-api call <method> --params '{...}'     (escape hatch: reads run, writes are a dry run)
+run script <name> --host <host>        (pinned allowlist, operator tier and a person at a terminal required)
+api call <method> --params '{...}'     (escape hatch: reads run with secrets masked; writes are a dry run, and user/token/script/action/role/usergroup/authentication/userdirectory/mediatype writes need api_call_admin: true)
 ```
 
 Handy flags on list commands: `--filter KEY=VALUE`, `--field NAME` (one value per line, for shell use), `-o json|jsonl|table|csv`, `--since 7d` (relative times work everywhere), `--tz America/New_York`.
@@ -205,7 +205,7 @@ zbxctl delete lost items --host web-01 --expect 3 --apply     # only objects dis
   {"mcpServers": {"zabbix": {"command": "zbxctl", "args": ["mcp"], "env": {"ZBXCTL_CONTEXT": "lab"}}}}
   ```
 
-  By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each is still a dry run until the call passes `apply: true`. Never offered: `run script`, `upgrade`, `context use`, `state prune`, and anything that works on a file path.
+  By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each is still a dry run until the call passes `apply: true`. Never offered: `run script`, `api call`, `upgrade`, `context use`, `state prune`, and anything that works on a file path. Results are marked as untrusted data, and the arguments an agent sends are positional values only: they cannot become flags.
 
 ## Configuration
 
@@ -223,7 +223,8 @@ contexts:
     default_limit: 100
     api_version: ""                 # pin e.g. "7.4" or "8.0"; empty = detect
     permissions: write              # readonly | operator | write
-    allowed_scripts: []             # what `run script` may execute; empty = blocked
+    allowed_scripts: []             # what `run script` may execute, as name@sha256:<hash of the command>; empty = blocked (a refusal prints the entry to add)
+    api_call_admin: false           # true lets `api call` write user, token, script, action, role... objects
     before_state: true              # audit files for changes made with --apply
     state_dir: ""                   # empty = ~/.local/state/zbxctl
 ```

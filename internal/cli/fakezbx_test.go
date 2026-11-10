@@ -32,6 +32,9 @@ type fakeReply struct {
 type fakeZabbix struct {
 	Calls   []rpcCall
 	Handler func(call rpcCall) fakeReply
+	// Context is YAML for the fields of the active context (permissions, allowed_scripts...),
+	// written to a config file; the URL and token still come from the environment.
+	Context string
 }
 
 func (f *fakeZabbix) called(method string) []rpcCall {
@@ -91,6 +94,15 @@ func runFake(t *testing.T, f *fakeZabbix, args ...string) (string, error) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("ZBXCTL_STATE_DIR", "")
 
+	if f.Context != "" {
+		dir := os.Getenv("HOME") + "/.config/zbxctl"
+		_ = os.MkdirAll(dir, 0o700)
+		body := "current_context: t\ncontexts:\n  t:\n"
+		for _, line := range strings.Split(strings.TrimSpace(f.Context), "\n") {
+			body += "    " + line + "\n"
+		}
+		_ = os.WriteFile(dir+"/config.yaml", []byte(body), 0o600)
+	}
 	clearFlagState()
 	defer clearFlagState()
 	old := os.Stdout

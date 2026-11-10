@@ -21,12 +21,22 @@ var (
 
 // Methods that are never sent through "api call": they hand out secrets or
 // have a safer dedicated command.
+// Keys are lower case: the method name is lower-cased before it is looked up, so
+// token.Generate cannot slip past a check written for token.generate.
 var apiDenied = map[string]string{
 	"user.login":               "authentication is handled by zbxctl itself",
 	"user.logout":              "authentication is handled by zbxctl itself",
-	"user.checkAuthentication": "use 'zbxctl auth status'",
+	"user.checkauthentication": "use 'zbxctl auth status'",
 	"token.generate":           "it would print a new API token",
 	"script.execute":           "use 'zbxctl run script', which has an allowlist and a confirmation token",
+}
+
+// Object families whose write methods are as good as admin: they change who can
+// log in, what runs where, and what is allowed. api call refuses them unless the
+// context sets api_call_admin; dedicated commands cover the legitimate cases.
+var apiAdminFamilies = map[string]bool{
+	"user": true, "token": true, "script": true, "action": true, "role": true, "usergroup": true,
+	"authentication": true, "userdirectory": true, "mediatype": true,
 }
 
 // isReadMethod reports methods that only read.
@@ -35,7 +45,7 @@ func isReadMethod(m string) bool {
 }
 
 var apiMethodRe = regexp.MustCompile(`^[a-z]+\.[a-zA-Z]+$|^apiinfo\.version$`)
-var secretKeyRe = regexp.MustCompile(`(?i)pass|secret|token|auth|api_?key|private`)
+var secretKeyRe = regexp.MustCompile(`(?i)pass|secret|token|auth|api_?key|private|psk|community`)
 
 // maskSecrets hides values of keys that look like secrets, for the dry run and
 // the audit file.
@@ -77,7 +87,8 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		outFmt := output.Format(flagOutput)
 		method := args[0]
-		if why, no := apiDenied[method]; no {
+		lower := strings.ToLower(method)
+		if why, no := apiDenied[lower]; no {
 			return cliPrintErr(outFmt, fmt.Sprintf("%s is not available through api call: %s", method, why), output.ExitUsage)
 		}
 		if !apiMethodRe.MatchString(method) {
@@ -126,10 +137,13 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 			return cliFail(outFmt, err)
 		}
 		applyStateSettings(cmd, ctx)
-		read := isReadMethod(method)
+		read := isReadMethod(lower)
 		if !read {
 			if err := ctx.CheckPermission("write"); err != nil {
 				return cliFail(outFmt, err)
+			}
+			if family, _, _ := strings.Cut(lower, "."); apiAdminFamilies[family] && !ctx.APICallAdmin {
+				return cliPrintErr(outFmt, fmt.Sprintf("%s changes %s objects, which api call refuses: it would be full admin access. Use the dedicated command, or set api_call_admin: true on this context if you mean it", method, family), output.ExitUsage)
 			}
 			if !flagApply {
 				return output.Print(outFmt, []output.Column{{Key: "method", Header: "METHOD"}, {Key: "would", Header: "WOULD"}, {Key: "applied", Header: "APPLIED"}},
@@ -156,6 +170,9 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 				return cliFail(outFmt, err)
 			}
 			_ = json.Unmarshal(raw, &result)
+			if !flagShowSecrets {
+				result = maskSecrets(result) // item passwords, PSKs, communities: --show-secrets to see them
+			}
 		}
 		doc := map[string]any{"data": result, "meta": map[string]any{"method": method, "command": "api call"}}
 		if outFmt == output.FormatJSONL {

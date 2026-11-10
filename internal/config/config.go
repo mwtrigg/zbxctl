@@ -28,7 +28,8 @@ type Context struct {
 	Proxy          string   `yaml:"proxy"`
 	DefaultLimit   int      `yaml:"default_limit"`   // default 100
 	Permissions    string   `yaml:"permissions"`     // readonly | operator | write; default write
-	AllowedScripts []string `yaml:"allowed_scripts"` // allowlist for run script; absent = blocked
+	AllowedScripts []string `yaml:"allowed_scripts"` // allowlist for run script, each entry "name@sha256:<hex of the command>"; absent = blocked
+	APICallAdmin   bool     `yaml:"api_call_admin"`  // allow api call to write user, token, script, action, role, usergroup, authentication, userdirectory and mediatype objects
 
 	// BeforeState controls the before-state file that bulk writes save under
 	// --apply. nil means the default, which is on. StateDir is where they go

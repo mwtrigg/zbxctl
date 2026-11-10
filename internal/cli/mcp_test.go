@@ -73,12 +73,12 @@ func TestMCPReadOnlyOffersNoWritesAndNothingThatTouchesFiles(t *testing.T) {
 		}
 	}
 	rw := toolNames(t, true)
-	for _, want := range []string{"zbxctl_disable_host", "zbxctl_acknowledge", "zbxctl_api_call"} {
+	for _, want := range []string{"zbxctl_disable_host", "zbxctl_acknowledge"} {
 		if !slices.Contains(rw, want) {
 			t.Errorf("--allow-writes must offer %s", want)
 		}
 	}
-	for _, never := range []string{"zbxctl_run_script", "zbxctl_upgrade", "zbxctl_context_use", "zbxctl_state_prune", "zbxctl_export_template", "zbxctl_import_template", "zbxctl_diff_template", "zbxctl_mcp", "zbxctl_llm_capabilities"} {
+	for _, never := range []string{"zbxctl_run_script", "zbxctl_api_call", "zbxctl_upgrade", "zbxctl_context_use", "zbxctl_state_prune", "zbxctl_export_template", "zbxctl_import_template", "zbxctl_diff_template", "zbxctl_mcp", "zbxctl_llm_capabilities"} {
 		if slices.Contains(rw, never) {
 			t.Errorf("%s must never be offered", never)
 		}

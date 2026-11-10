@@ -508,6 +508,8 @@ func runCreateHost(cmd *cobra.Command, _ []string) error {
 }
 
 // generateToken returns a 6-character random alphanumeric string for run script confirmation.
+var confirmationToken = generateToken
+
 func generateToken() (string, error) {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 6)
@@ -531,8 +533,12 @@ var runScriptCmd = &cobra.Command{
 	Long: `Execute a script from the Zabbix script library on a monitored host.
 
 SECURITY: This command executes code on a monitored host. It requires:
-  - allowed_scripts in the active context config (run script is blocked otherwise)
-  - Manual token confirmation (--yes has no effect on this command)
+  - the operator or write permission tier
+  - allowed_scripts in the active context config, each entry pinned to the script's
+    command as name@sha256:<hash>; a script whose command changed is refused, and the
+    refusal prints the entry to add once you have reviewed the new command
+  - a person at a terminal: the confirmation token is read from /dev/tty, so it cannot
+    be piped in, and --yes has no effect on this command
 
 Recommended: use a read-only API token for agent contexts. Enable run script
 only for pre-reviewed diagnostic scripts (ping, traceroute, read-only checks).`,
@@ -555,6 +561,10 @@ func runRunScript(_ *cobra.Command, args []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
 		return cliFail(output.Format(flagOutput), err)
+	}
+	// Running a script is acting on a host, not reading: a readonly context may not.
+	if err := ctx.CheckPermission("operator"); err != nil {
+		return cliFail(outFmt, err)
 	}
 
 	// allowed_scripts check — independent of permission tier.
@@ -587,35 +597,35 @@ func runRunScript(_ *cobra.Command, args []string) error {
 		return cliFail(outFmt, err)
 	}
 
-	// Check against allowed_scripts allowlist (match on name or ID).
-	allowed := false
-	for _, s := range ctx.AllowedScripts {
-		if s == script.Name || s == script.ScriptID {
-			allowed = true
-			break
-		}
+	// Check against allowed_scripts: the script's name or ID AND a hash of its
+	// command must match an entry, so a script edited after review is refused.
+	if ok, why := scriptAllowed(ctx.AllowedScripts, script.Name, script.ScriptID, script.Command); !ok {
+		return cliPrintErr(outFmt, why, output.ExitError)
 	}
-	if !allowed {
-		fmt.Fprintf(os.Stderr, "error: script %q is not in allowed_scripts for this context\n", script.Name)
-		return &cliErr{code: output.ExitError}
+	tty, err := openConfirmationInput()
+	if err != nil {
+		return cliPrintErr(outFmt, err.Error(), output.ExitError)
 	}
+	defer tty.Close()
 
-	// Always print script details — no flag can suppress this output.
+	// Always print script details — no flag can suppress this output. Everything
+	// that came from the server is printed with control characters made visible,
+	// so a command cannot hide itself with carriage returns or escape codes.
 	fmt.Fprintf(os.Stderr, "\n  Script execution details:\n")
-	fmt.Fprintf(os.Stderr, "   Script:     %s (id: %s)\n", script.Name, script.ScriptID)
+	fmt.Fprintf(os.Stderr, "   Script:     %s (id: %s)\n", printable(script.Name), script.ScriptID)
 	fmt.Fprintf(os.Stderr, "   Type:       %s\n", resources.ScriptTypeLabel(script.Type))
 	fmt.Fprintf(os.Stderr, "   Execute on: %s\n", resources.ExecuteOnLabel(script.ExecuteOn))
-	fmt.Fprintf(os.Stderr, "   Host:       %s (id: %s)\n", runScriptHost, hostID)
+	fmt.Fprintf(os.Stderr, "   Host:       %s (id: %s)\n", printable(runScriptHost), hostID)
 	if script.Command != "" {
 		fmt.Fprintf(os.Stderr, "   Command:\n")
-		for _, line := range strings.Split(script.Command, "\n") {
+		for _, line := range strings.Split(printable(script.Command), "\n") {
 			fmt.Fprintf(os.Stderr, "     %s\n", line)
 		}
 	}
 	fmt.Fprintln(os.Stderr)
 
-	// Token confirmation — --yes has no effect.
-	token, err := generateToken()
+	// Token confirmation — --yes has no effect, and the answer comes from the terminal.
+	token, err := confirmationToken()
 	if err != nil {
 		return fmt.Errorf("generating confirmation token: %w", err)
 	}
@@ -623,7 +633,7 @@ func runRunScript(_ *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Confirmation token (expires in 60s): %s\n", token)
 	fmt.Fprintf(os.Stderr, "Type the token above to execute: ")
 
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner := bufio.NewScanner(tty)
 	if !scanner.Scan() {
 		fmt.Fprintln(os.Stderr, "\naborted")
 		return &cliErr{code: output.ExitError}

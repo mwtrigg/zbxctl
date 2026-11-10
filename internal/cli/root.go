@@ -28,6 +28,7 @@ var (
 	flagRetries          int
 	flagTZ               string
 	flagAllowUnsupported bool
+	flagShowSecrets      bool
 )
 
 // cliErr is a sentinel error that carries a desired process exit code.
@@ -180,6 +181,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&flagAllowUnsupported, "allow-unsupported", os.Getenv("ZBXCTL_ALLOW_UNSUPPORTED") != "", "try a Zabbix server older than zbxctl supports (7.4)")
 	rootCmd.PersistentFlags().BoolVar(&flagRaw, "raw", false,
 		"include raw API values (*_raw, *_unix) next to the readable ones")
+	rootCmd.PersistentFlags().BoolVar(&flagShowSecrets, "show-secrets", false,
+		"show secret values (SNMP communities, passwords in raw API results) instead of ******")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure",
 		false, "disable TLS verification")
 
