@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -54,6 +55,7 @@ func beginWrite(cmd *cobra.Command, ctx *config.Context, name, target, desc stri
 	}
 	w.rec = r
 	fmt.Fprintf(os.Stderr, "before-state saved: %s\n", r.path)
+	w.note(stateSent, nil) // the caller makes the request next
 	return w, true, nil
 }
 
@@ -67,7 +69,17 @@ func (w *writeRecord) note(status string, err error) {
 }
 
 // ok records that the change went through.
-func (w *writeRecord) ok() { w.note(stateApplied, nil) }
+func (w *writeRecord) ok() {
+	w.note(stateApplied, nil)
+	w.prune()
+}
+
+// prune applies state_keep once the outcome is recorded.
+func (w *writeRecord) prune() {
+	if w != nil && w.rec != nil {
+		pruneOldStates(filepath.Dir(w.rec.path), w.rec.path)
+	}
+}
 
 // failed records a failed write and returns the error to report. If Zabbix
 // refused the request nothing changed and the file is removed; if the outcome
@@ -82,6 +94,7 @@ func (w *writeRecord) failed(err error) error {
 		return err
 	}
 	w.note(stateUnknown, err)
+	w.prune()
 	where := "(none was written: --no-state)"
 	if w != nil && w.rec != nil {
 		where = w.rec.path

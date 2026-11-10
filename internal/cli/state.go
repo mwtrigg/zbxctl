@@ -75,6 +75,10 @@ type stateFile struct {
 	Items   int
 	Actions []string
 	Size    int64
+
+	// Unresolved is true when a target is still pending or unknown: the run was
+	// cut off or its outcome was lost, so the file is the only record of it.
+	Unresolved bool
 }
 
 // readStateFiles lists the before-state files in dir, newest first. Files that
@@ -108,13 +112,23 @@ func readStateFiles(dir string) ([]stateFile, error) {
 		t, _ := time.Parse(time.RFC3339, doc.Time)
 		sf := stateFile{Path: path, Name: e.Name(), Time: t, Command: doc.Command, Items: len(doc.Items), Size: int64(len(b))}
 		for _, it := range doc.Items {
+			if st, _ := it["status"].(string); st == statePending || st == stateUnknown || st == stateSent {
+				sf.Unresolved = true
+			}
 			if a, ok := it["action"].(string); ok && len(sf.Actions) < 3 {
 				sf.Actions = append(sf.Actions, a)
 			}
 		}
 		out = append(out, sf)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
+	// Newest first. Files written in the same instant share a time, so the name,
+	// which carries nanoseconds, breaks the tie: pruning must keep the newest.
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].Time.Equal(out[j].Time) {
+			return out[i].Time.After(out[j].Time)
+		}
+		return out[i].Name > out[j].Name
+	})
 	return out, nil
 }
 

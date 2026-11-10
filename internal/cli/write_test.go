@@ -712,6 +712,10 @@ func TestWriteStateKeepsOnlyTheNewestN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if n := len(countStateFiles(t, dir)); n != 6 {
+		t.Fatalf("pruning must wait until the outcome is known; %d files", n)
+	}
+	pruneOldStates(dir, path)
 	left := countStateFiles(t, dir)
 	if len(left) != 3 {
 		t.Fatalf("kept %d, want 3: %+v", len(left), left)

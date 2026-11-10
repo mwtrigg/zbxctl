@@ -165,11 +165,14 @@ func createStateFile(name string) (string, error) {
 }
 
 // pruneOldStates keeps the newest stateKeep before-state files in dir and
-// deletes the rest. It never deletes justWritten, only touches files zbxctl
-// wrote, says so on stderr when it deletes anything, and never fails the change
-// that triggered it.
+// deletes the rest. It runs after a write's outcome is known, never before. It
+// never deletes justWritten, nor a file with a target whose outcome is still
+// unresolved (pending or unknown): that is the record someone needs. It only
+// touches files zbxctl wrote, says so on stderr when it deletes anything, and never
+// fails the change that triggered it. Under MCP it never runs: an agent must not be
+// able to rotate the audit trail away, so only a person runs `state prune`.
 func pruneOldStates(dir, justWritten string) {
-	if stateKeep <= 0 {
+	if stateKeep <= 0 || os.Getenv("ZBXCTL_FROM_MCP") != "" {
 		return
 	}
 	files, err := readStateFiles(dir)
@@ -178,7 +181,7 @@ func pruneOldStates(dir, justWritten string) {
 	}
 	removed := 0
 	for _, f := range files[stateKeep:] { // files are newest first
-		if f.Path == justWritten {
+		if f.Path == justWritten || f.Unresolved {
 			continue
 		}
 		if os.Remove(f.Path) == nil {
@@ -193,6 +196,7 @@ func pruneOldStates(dir, justWritten string) {
 // Outcomes recorded per target in the before-state file.
 const (
 	statePending = "pending" // planned, not yet attempted
+	stateSent    = "sent"    // the request is being sent; if the run ended here the outcome is unknown
 	stateApplied = "applied" // the change went through
 	stateFailed  = "failed"  // Zabbix refused it; nothing changed
 	stateUnknown = "unknown" // the request may or may not have been executed
@@ -254,7 +258,7 @@ func newStateRecorder(name string, steps []*step) (*stateRecorder, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &stateRecorder{path: path, name: name, time: time.Now().UTC().Format(time.RFC3339)}
+	r := &stateRecorder{path: path, name: name, time: time.Now().UTC().Format(time.RFC3339Nano)}
 	for _, s := range steps {
 		r.items = append(r.items, stateItem{Target: s.Key, Action: s.Desc, Before: s.Before, Status: statePending})
 	}
@@ -262,7 +266,6 @@ func newStateRecorder(name string, steps []*step) (*stateRecorder, error) {
 		_ = os.Remove(path)
 		return nil, err
 	}
-	pruneOldStates(filepath.Dir(path), path)
 	return r, nil
 }
 
@@ -349,6 +352,13 @@ func runSteps(outFmt output.Format, name string, specCols []output.Column, steps
 		rec = r
 		fmt.Fprintf(os.Stderr, "before-state saved: %s\n", r.path)
 	}
+	if rec != nil {
+		defer func() {
+			if _, err := os.Stat(rec.path); err == nil { // it may have been removed: Zabbix refused the first change
+				pruneOldStates(filepath.Dir(rec.path), rec.path)
+			}
+		}()
+	}
 	note := func(i int, status string, err error) {
 		if rec == nil {
 			return
@@ -363,6 +373,7 @@ func runSteps(outFmt output.Format, name string, specCols []output.Column, steps
 	applied := steps[:0:0]
 	unknown := false
 	for i, s := range steps {
+		note(i, stateSent, nil) // so a run killed mid-request does not look "not yet attempted"
 		err := s.Apply()
 		if err != nil && !definitive(err) && s.Verify != nil {
 			// The request may have been executed. Look before deciding.

@@ -32,13 +32,15 @@ var mcpHiddenFlags = map[string]bool{
 	"file": true, "dir": true, "id-file": true, "value-file": true, "password-file": true, "params-file": true, "state-dir": true,
 	"insecure": true, "allow-unsupported": true, "dry-run": true, "yes": true, "output": true, "raw": true, "no-state": true,
 	"show-secrets": true,
+	"state-keep":   true, // would prune the audit trail; only a person runs `state prune`
+	"no-verify":    true, // would skip the re-read that checks a change
 	"context":      true, // the server's own environment pins the context; an agent must not retarget it
 }
 
 // mcpChildDenied are the flags a child started by the MCP server refuses even
 // when they arrive some other way (the child enforces the policy itself, so a
-// bug in how the arguments are assembled cannot defeat it). --output is the one
-// hidden flags the server itself passes (--output, and --dry-run for a write without apply).
+// bug in how the arguments are assembled cannot defeat it). --output and --dry-run
+// are the hidden flags the server itself passes (--dry-run for a write without apply).
 func mcpChildDenied(flag string) bool {
 	return flag != "output" && flag != "dry-run" && mcpHiddenFlags[flag]
 }
