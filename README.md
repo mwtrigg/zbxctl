@@ -74,15 +74,30 @@ Write (dry run unless `--apply`; `--yes` is an alias):
 
 ```
 enable | disable  host <host> | trigger <id>
-acknowledge <event-id> [--message ...] [--close]
+acknowledge <event-id> [--message ...] [--close | --unacknowledge | --suppress [--until t] | --unsuppress] [--severity s]
 maintenance list | create | delete
 create host | update host | delete host
+tag host <host> --tag k [--value v]   untag host <host> --tag k [--value v]
+create user | delete user | create usergroup | delete usergroup
+import template|host <file>       # without --apply: shows the diff only
 run script <name> --host <host>   # dangerous: executes code on a monitored host
+```
+
+`delete user` refuses `Admin` and the user that owns the credentials in use. `create user` takes the password from `--password-file` or `--password-stdin`, never from a flag value.
+
+Export, diff and import of templates and hosts:
+
+```
+zbxctl export template web-base --file web-base.yaml     # yaml | json | xml
+zbxctl diff template web-base.yaml                       # what an import would change, read-only
+zbxctl import template web-base.yaml --apply             # never deletes anything missing from the file
 ```
 
 Housekeeping: `version`, `upgrade [--check]`, `completion bash|zsh|fish|powershell`.
 
 `--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `--host` and `--group` accept an ID or a name.
+
+On list commands `--filter KEY=VALUE` (repeatable) adds an exact-match API filter and `--field NAME` prints just that field, one value per line, for shell use.
 
 ## For agents
 

@@ -196,3 +196,51 @@ func TestCreateUserAndGroupParams(t *testing.T) {
 		t.Fatalf("user.delete params should be an ID array: %v", (*calls)[2]["params"])
 	}
 }
+
+func TestFlattenComparison(t *testing.T) {
+	raw := []byte(`{"templates":{"updated":[{"before":{"name":"T","description":"a"},"after":{"name":"T","description":"a"},
+		"items":{"updated":[{"before":{"name":"I","delay":"30s"},"after":{"name":"I","delay":"60s"}}],"created":[{"name":"New","key":"k"}]}}],
+		"deleted":[{"name":"Gone"}]}}`)
+	got, err := FlattenComparison(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"templates/Gone":        "deleted",
+		"templates/T/items/I":   "updated",
+		"templates/T/items/New": "created",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v", got)
+	}
+	for _, c := range got {
+		if want[c.Path] != c.Action {
+			t.Errorf("%s: %s", c.Path, c.Action)
+		}
+		if c.Path == "templates/T/items/I" && (len(c.Fields) != 1 || c.Fields[0] != "delay: 30s -> 60s") {
+			t.Errorf("fields: %v", c.Fields)
+		}
+	}
+	none, err := FlattenComparison([]byte(`[]`))
+	if err != nil || len(none) != 0 {
+		t.Fatalf("[] must mean no changes: %v %v", none, err)
+	}
+}
+
+func TestGetTemplateFallsBackToVisibleName(t *testing.T) {
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		res := `[]`
+		if n == 2 {
+			res = `[{"templateid":"9","host":"tech","name":"Visible Name"}]`
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + res + `,"id":1}`))
+	}))
+	defer srv.Close()
+	c, _ := api.NewClient(context.Background(), &config.Context{URL: srv.URL, APIToken: "x"})
+	tpl, err := GetTemplate(c, "Visible Name")
+	if err != nil || tpl.TemplateID != "9" || n != 2 {
+		t.Fatalf("tpl=%v err=%v calls=%d", tpl, err, n)
+	}
+}

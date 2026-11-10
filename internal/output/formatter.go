@@ -152,12 +152,14 @@ func printJSON(_ []Column, rows []map[string]any) error {
 		},
 	}
 	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	return enc.Encode(envelope)
 }
 
 func printJSONL(_ []Column, rows []map[string]any) error {
 	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
 	for _, row := range rows {
 		if err := enc.Encode(row); err != nil {
 			return err
