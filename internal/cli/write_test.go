@@ -484,3 +484,26 @@ func TestAPICallGuards(t *testing.T) {
 		t.Fatal("bad JSON must be refused")
 	}
 }
+
+func TestEventVerbsAreSeparateCommands(t *testing.T) {
+	defer func() {
+		ackUnack, ackSuppress, ackUnsuppress, ackSuppressUntil, ackMessage = false, false, false, "", ""
+	}()
+	for verb, want := range map[string]string{"unacknowledge": "event.acknowledge", "suppress": "event.acknowledge", "unsuppress": "event.acknowledge"} {
+		out, methods := runCLI(t, verb, "5", "--apply", "--no-verify", "--state-dir", t.TempDir())
+		if lastErr != nil || !slices.Contains(methods, want) {
+			t.Errorf("%s: err=%v methods=%v out=%s", verb, lastErr, methods, out)
+		}
+		ackUnack, ackSuppress, ackUnsuppress = false, false, false
+	}
+	out, _ := runCLI(t, "suppress", "5", "--until", "7d")
+	ackSuppress, ackSuppressUntil = false, ""
+	if !strings.Contains(out, "suppress event 5") || !strings.Contains(out, " until ") {
+		t.Fatalf("the dry run must say what and until when: %s", out)
+	}
+	out, _ = runCLI(t, "unacknowledge", "5")
+	ackUnack = false
+	if !strings.Contains(out, "unacknowledge event 5") {
+		t.Fatalf("dry run of unacknowledge: %s", out)
+	}
+}

@@ -108,7 +108,7 @@ var (
 
 var acknowledgeCmd = &cobra.Command{
 	Use:   "acknowledge <event-id>",
-	Short: "Acknowledge an event",
+	Short: "Acknowledge an event (and optionally close it or change its severity); see also unacknowledge, suppress, unsuppress",
 	Args:  cobra.ArbitraryArgs,
 	RunE:  runAcknowledge,
 }
@@ -120,6 +120,9 @@ func init() {
 	acknowledgeCmd.Flags().BoolVar(&ackSuppress, "suppress", false, "suppress the problem (hide it from the problem list)")
 	acknowledgeCmd.Flags().StringVar(&ackSuppressUntil, "until", "", "with --suppress: suppress until this time (unix, RFC3339, YYYY-MM-DD, or from now like 24h, 7d); default indefinitely")
 	acknowledgeCmd.Flags().BoolVar(&ackUnsuppress, "unsuppress", false, "lift a suppression")
+	for flag, verb := range map[string]string{"unacknowledge": "unacknowledge", "suppress": "suppress", "unsuppress": "unsuppress", "until": "suppress --until"} {
+		_ = acknowledgeCmd.Flags().MarkDeprecated(flag, "use 'zbxctl "+verb+"' instead")
+	}
 	acknowledgeCmd.Flags().StringVar(&ackSeverity, "severity", "", "also change the problem severity (0-5 or name)")
 }
 

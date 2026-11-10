@@ -88,7 +88,8 @@ Write (dry run unless `--apply`; `--yes` is an alias):
 
 ```
 enable | disable  host <host> | trigger <id>
-acknowledge <event-id> [--message ...] [--close | --unacknowledge | --suppress [--until t] | --unsuppress] [--severity s]
+acknowledge <event-id> [--message ...] [--close] [--severity s]   /   unacknowledge <event-id>
+suppress <event-id> [--until 7d]   /   unsuppress <event-id>      # hide a problem for a while; not the same as acknowledging
 maintenance list | create | extend | shorten | delete
 create host | update host | delete host
 tag host <host> --tag k [--value v]   untag host <host> --tag k [--value v]
@@ -104,7 +105,7 @@ import template|host <file>       # without --apply: shows the diff only
 run script <name> --host <host>   # dangerous: executes code on a monitored host
 ```
 
-Bulk writes: `enable|disable host|trigger`, `acknowledge`, `maintenance extend|shorten|delete` and `delete host` take several targets (arguments and/or `--id-file`, one per line). All targets are resolved first, so a typo changes nothing; `--expect N` refuses to run unless exactly N distinct targets resolve; with `--apply` a before-state file is saved under `~/.local/state/zbxctl/` (`--state-dir`, `--no-state`) and every change is re-read to verify it (`--no-verify` skips that). `acknowledge --close` only closes problems whose trigger allows manual close and acknowledges the others instead, then re-checks after about 15 seconds since closing is asynchronous.
+Bulk writes: `enable|disable host|trigger`, `acknowledge`, `maintenance extend|shorten|delete` and `delete host` take several targets (arguments and/or `--id-file`, one per line). All targets are resolved first, so a typo changes nothing; `--expect N` refuses to run unless exactly N distinct targets resolve; with `--apply` a before-state file is saved under `~/.local/state/zbxctl/` (`--state-dir`, `--no-state`) and every change is re-read to verify it (`--no-verify` skips that). Acknowledging and suppressing are different things: acknowledge says someone has seen the problem, suppress hides it from the problem list (for a while, or indefinitely). `acknowledge --close` only closes problems whose trigger allows manual close and acknowledges the others instead, then re-checks after about 15 seconds since closing is asynchronous.
 
 `delete user` refuses `Admin` and the user that owns the credentials in use. `create user` takes the password from `--password-file` or `--password-stdin`, never from a flag value.
 
