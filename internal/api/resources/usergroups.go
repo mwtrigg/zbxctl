@@ -31,7 +31,7 @@ func GetUserGroups(c *api.Client, f UserGroupFilter) ([]UserGroup, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("usergroup.get", params)
+	raw, err := c.CallList("usergroup.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("usergroup.get: %w", err)
 	}

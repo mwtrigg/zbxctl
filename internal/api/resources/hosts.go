@@ -137,7 +137,7 @@ func GetHosts(c *api.Client, f HostFilter) ([]Host, error) {
 	}
 	params["sortorder"] = so
 
-	raw, err := c.Call("host.get", params)
+	raw, err := c.CallList("host.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("host.get: %w", err)
 	}

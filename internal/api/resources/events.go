@@ -123,7 +123,7 @@ func GetEvents(c *api.Client, f EventFilter) ([]Event, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("event.get", params)
+	raw, err := c.CallList("event.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("event.get: %w", err)
 	}

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
 // runCLI executes the command tree against a fake Zabbix and returns stdout
@@ -74,5 +76,50 @@ func TestYesIsAliasForApply(t *testing.T) {
 	_, methods := runCLI(t, "disable", "host", "web1", "--yes")
 	if !slices.Contains(methods, "host.update") {
 		t.Fatalf("--yes did not call host.update: %v", methods)
+	}
+}
+
+func TestFilterLandsInFilterObject(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Method == "host.get" {
+			got = req.Params
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":[{"hostid":"1","host":"a","name":"A","status":"1"},{"hostid":"2","host":"b","name":"B","status":"1"}],"id":1}`))
+	}))
+	defer srv.Close()
+	t.Setenv("ZBXCTL_URL", srv.URL)
+	t.Setenv("ZBXCTL_API_TOKEN", "x")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	rootCmd.SetArgs([]string{"--apply=false", "--raw=false", "--filter", "status=1", "--filter", "status=0", "--field", "host", "get", "hosts"})
+	err := rootCmd.Execute()
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	_, _ = io.Copy(&buf, r)
+	rootCmd.SetArgs(nil)
+	flagFilter, flagField = nil, ""
+	output.Field = ""
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, ok := got["filter"].(map[string]any)
+	if !ok || len(f["status"].([]any)) != 2 {
+		t.Fatalf("filter not wrapped/merged: %v", got)
+	}
+	if _, top := got["status"]; top {
+		t.Fatal("status at top level")
+	}
+	if buf.String() != "a\nb\n" {
+		t.Fatalf("--field output %q", buf.String())
 	}
 }

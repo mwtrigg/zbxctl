@@ -33,7 +33,7 @@ func GetGroups(c *api.Client, f GroupFilter) ([]Group, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("hostgroup.get", params)
+	raw, err := c.CallList("hostgroup.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("hostgroup.get: %w", err)
 	}

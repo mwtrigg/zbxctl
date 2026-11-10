@@ -69,3 +69,14 @@ func TestFmtUnixIsRFC3339UTC(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestCobraAndFieldErrorsAreUsage(t *testing.T) {
+	for _, msg := range []string{"unknown flag: --nope", "accepts 1 arg(s), received 0", `unknown command "x" for "zbxctl"`} {
+		if classify(errors.New(msg)) != output.ExitUsage {
+			t.Errorf("%q not classified as usage", msg)
+		}
+	}
+	if classify(&output.FieldError{Msg: "x"}) != output.ExitUsage {
+		t.Error("FieldError not usage")
+	}
+}

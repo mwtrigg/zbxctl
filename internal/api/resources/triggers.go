@@ -74,7 +74,7 @@ func GetTriggers(c *api.Client, f TriggerFilter) ([]Trigger, error) {
 	params["sortfield"] = sf
 	params["sortorder"] = so
 
-	raw, err := c.Call("trigger.get", params)
+	raw, err := c.CallList("trigger.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("trigger.get: %w", err)
 	}

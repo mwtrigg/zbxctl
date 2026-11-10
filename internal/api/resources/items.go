@@ -82,7 +82,7 @@ func GetItems(c *api.Client, f ItemFilter) ([]Item, error) {
 		params["limit"] = f.Limit
 	}
 
-	raw, err := c.Call("item.get", params)
+	raw, err := c.CallList("item.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("item.get: %w", err)
 	}
@@ -134,7 +134,7 @@ func GetLatestData(c *api.Client, f ItemFilter) ([]Item, error) {
 	// let items without data use up the limit and hide the ones that have values.
 	params["monitored"] = true
 
-	raw, err := c.Call("item.get", params)
+	raw, err := c.CallList("item.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("item.get (latestdata): %w", err)
 	}

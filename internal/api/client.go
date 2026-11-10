@@ -49,6 +49,10 @@ type Client struct {
 	httpClient  *http.Client
 	endpoint    string
 	bearerToken string // pre-auth header token (api_token or session token)
+
+	// Filters are exact-match KEY=VALUE pairs (--filter) merged into the API
+	// "filter" object of list calls made through CallList.
+	Filters map[string][]string
 }
 
 type rpcRequest struct {
@@ -116,6 +120,23 @@ func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 // Call invokes a Zabbix API method with the given params.
 func (c *Client) Call(method string, params any) (json.RawMessage, error) {
 	return c.callRaw(context.Background(), method, params)
+}
+
+// CallList is Call for list queries: it merges c.Filters into params["filter"].
+// Zabbix ignores filter keys placed at the top level of params, so they must
+// live inside the filter object.
+func (c *Client) CallList(method string, params map[string]any) (json.RawMessage, error) {
+	if len(c.Filters) > 0 {
+		f, _ := params["filter"].(map[string]any)
+		if f == nil {
+			f = map[string]any{}
+		}
+		for k, v := range c.Filters {
+			f[k] = v
+		}
+		params["filter"] = f
+	}
+	return c.Call(method, params)
 }
 
 // APIVersion calls apiinfo.version (no authentication required).
