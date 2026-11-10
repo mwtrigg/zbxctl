@@ -9,6 +9,8 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-10
+
 ### Fixed
 - `update host` prints the host as it is after the change (it showed the old visible name after `--visible-name`).
 - zbxctl refuses to keep before-state files in a directory that another user owns or that other users can write to
