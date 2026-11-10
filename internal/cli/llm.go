@@ -827,6 +827,7 @@ func init() {
 
 func runLLMCapabilities(_ *cobra.Command, _ []string) error {
 	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	return enc.Encode(capabilities)
 }
@@ -836,6 +837,7 @@ func runLLMSchema(_ *cobra.Command, args []string) error {
 	for _, cap := range capabilities {
 		if cap.Command == query {
 			enc := json.NewEncoder(os.Stdout)
+			enc.SetEscapeHTML(false)
 			enc.SetIndent("", "  ")
 			return enc.Encode(cap)
 		}
