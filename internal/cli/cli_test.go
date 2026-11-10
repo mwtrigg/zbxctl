@@ -125,3 +125,19 @@ func TestFindHistoryGapsIncludingWindowEdges(t *testing.T) {
 		t.Fatalf("no gaps over an hour: %+v", g)
 	}
 }
+
+func TestDisplayZoneRendersOffsetAndHandlesDST(t *testing.T) {
+	defer setDisplayZone("")
+	if err := setDisplayZone("America/New_York"); err != nil {
+		t.Skip("tz database not available")
+	}
+	if got := fmtUnix("1783000000"); got != "2026-07-02T09:46:40-04:00" { // EDT
+		t.Errorf("summer: %q", got)
+	}
+	if got := fmtUnix("1800000000"); got != "2027-01-15T03:00:00-05:00" { // EST
+		t.Errorf("winter: %q", got)
+	}
+	if err := setDisplayZone("Not/AZone"); err == nil || fmtUnix("1783000000") != "2026-07-02T13:46:40Z" {
+		t.Errorf("an unknown zone must fall back to UTC with a warning")
+	}
+}
