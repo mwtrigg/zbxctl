@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -22,7 +23,10 @@ func TestCheckPermission(t *testing.T) {
 		{"readonly blocks operator", "readonly", "operator", true},
 		{"readonly blocks write", "readonly", "write", true},
 		{"empty defaults to write", "", "write", false},
-		{"unknown tier defaults to write", "superadmin", "write", false},
+		{"unknown tier is refused for write", "superadmin", "write", true},
+		{"unknown tier is refused even for readonly", "read-only", "readonly", true},
+		{"tier is case and space tolerant", " ReadOnly ", "write", true},
+		{"tier is case and space tolerant, allowed", " Operator ", "operator", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,3 +75,63 @@ func TestBeforeStateSettingDefaultsOnAndEnvOverridesFile(t *testing.T) {
 		t.Fatalf("the environment must override the file: %+v", ctx)
 	}
 }
+
+// writeConfig puts a config file under a throwaway HOME and returns nothing.
+func writeConfig(t *testing.T, yaml string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := home + "/.config/zbxctl"
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/config.yaml", []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"ZBXCTL_CONTEXT", "ZBXCTL_URL", "ZBXCTL_API_TOKEN"} {
+		t.Setenv(k, "")
+	}
+}
+
+func TestLoadConfigFailsClosed(t *testing.T) {
+	const base = "current_context: lab\ncontexts:\n  lab:\n    url: https://zbx.example.com\n    api_token: t\n    permissions: readonly\n"
+	t.Run("a good config loads", func(t *testing.T) {
+		writeConfig(t, base)
+		if _, ctx, err := LoadConfig(""); err != nil || ctx.CheckPermission("write") == nil {
+			t.Fatalf("readonly must stay readonly: %v", err)
+		}
+	})
+	t.Run("a misspelt tier is a config error", func(t *testing.T) {
+		writeConfig(t, "contexts:\n  lab:\n    url: https://zbx.example.com\n    permissions: read-only\ncurrent_context: lab\n")
+		if _, _, err := LoadConfig(""); err == nil || !contains(err.Error(), "not a known tier") {
+			t.Fatalf("want a tier error, got %v", err)
+		}
+	})
+	t.Run("an unknown context named by flag is an error even with env credentials", func(t *testing.T) {
+		writeConfig(t, base)
+		t.Setenv("ZBXCTL_URL", "https://zbx.example.com")
+		t.Setenv("ZBXCTL_API_TOKEN", "t")
+		if _, _, err := LoadConfig("nosuch"); err == nil || !contains(err.Error(), "not defined") {
+			t.Fatalf("want a context error, got %v", err)
+		}
+	})
+	t.Run("an unknown context named by ZBXCTL_CONTEXT is an error", func(t *testing.T) {
+		writeConfig(t, base)
+		t.Setenv("ZBXCTL_CONTEXT", "lab-ro")
+		t.Setenv("ZBXCTL_URL", "https://zbx.example.com")
+		if _, _, err := LoadConfig(""); err == nil {
+			t.Fatal("a misspelt ZBXCTL_CONTEXT must not fall back to an empty context")
+		}
+	})
+	t.Run("an unknown key is an error", func(t *testing.T) {
+		writeConfig(t, "contexts:\n  lab:\n    url: https://zbx.example.com\n    permisions: readonly\ncurrent_context: lab\n")
+		if _, _, err := LoadConfig(""); err == nil || !contains(err.Error(), "permisions") {
+			t.Fatalf("a misspelt key must be named in the error, got %v", err)
+		}
+		if _, err := LoadConfigFile(); err == nil {
+			t.Fatal("LoadConfigFile must reject unknown keys too")
+		}
+	})
+}
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }

@@ -1,10 +1,12 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -53,22 +55,37 @@ func (e *PermissionError) Error() string {
 }
 
 // CheckPermission returns an error if the context's tier does not permit required.
-// An empty Permissions field defaults to "write" (backwards-compatible).
+// An empty Permissions field defaults to "write" (backwards-compatible). A tier
+// that is not one of the three is refused, never granted: a typo must not give
+// more access than was meant.
 func (ctx *Context) CheckPermission(required string) error {
-	tier := ctx.Permissions
+	tier := normalizeTier(ctx.Permissions)
 	if tier == "" {
 		tier = "write"
 	}
-	if permLevel(tier) < permLevel(required) {
-		have := tier
-		if ctx.Permissions == "" {
-			have = "write (default)"
+	have, req := permLevel(tier), permLevel(required)
+	if have < 0 || have < req {
+		shown := ctx.Permissions
+		if shown == "" {
+			shown = "write (default)"
 		}
-		return &PermissionError{Required: required, Have: have}
+		return &PermissionError{Required: required, Have: shown}
 	}
 	return nil
 }
 
+func normalizeTier(t string) string { return strings.ToLower(strings.TrimSpace(t)) }
+
+// ValidateTier reports whether t is empty (the default) or a known tier.
+func ValidateTier(t string) error {
+	n := normalizeTier(t)
+	if n == "" || permLevel(n) >= 0 {
+		return nil
+	}
+	return fmt.Errorf("permissions %q is not a known tier (use readonly, operator or write)", t)
+}
+
+// permLevel returns the rank of a tier, or -1 for one that is not known.
 func permLevel(tier string) int {
 	switch tier {
 	case "readonly":
@@ -78,8 +95,19 @@ func permLevel(tier string) int {
 	case "write":
 		return 2
 	default:
-		return 2 // unknown tiers are permissive (human operator use case)
+		return -1
 	}
+}
+
+// parseConfig decodes the config file strictly: an unknown key (a misspelt
+// setting) is an error rather than a setting that silently does nothing.
+func parseConfig(data []byte, cfg *Config) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(cfg); err != nil && err.Error() != "EOF" {
+		return err
+	}
+	return nil
 }
 
 // defaultConfigPath returns ~/.config/zbxctl/config.yaml.
@@ -113,7 +141,7 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 		return nil, nil, fmt.Errorf("reading config: %w", err)
 	}
 	if err == nil {
-		if err := yaml.Unmarshal(data, cfg); err != nil {
+		if err := parseConfig(data, cfg); err != nil {
 			return nil, nil, fmt.Errorf("parsing config: %w", err)
 		}
 	}
@@ -132,7 +160,15 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	if ctxName != "" {
 		if c, ok := cfg.Contexts[ctxName]; ok {
 			ctx = c
+		} else if contextOverride != "" || os.Getenv("ZBXCTL_CONTEXT") != "" {
+			// Named on purpose (flag or environment) but not in the file: a
+			// misspelt name must not fall back to an empty context that the
+			// environment then fills in with the default (write) tier.
+			return nil, nil, fmt.Errorf("context %q is not defined in the config file", ctxName)
 		}
+	}
+	if err := ValidateTier(ctx.Permissions); err != nil {
+		return nil, nil, fmt.Errorf("context %q: %w", ctxName, err)
 	}
 
 	// Per-field env var overrides.
@@ -195,7 +231,7 @@ func LoadConfigFile() (*Config, error) {
 		return nil, fmt.Errorf("reading config: %w", err)
 	}
 	if err == nil {
-		if err := yaml.Unmarshal(data, cfg); err != nil {
+		if err := parseConfig(data, cfg); err != nil {
 			return nil, fmt.Errorf("parsing config: %w", err)
 		}
 	}
@@ -215,7 +251,7 @@ func WriteCurrentContext(name string) error {
 		return fmt.Errorf("reading config: %w", err)
 	}
 	if err == nil {
-		if err := yaml.Unmarshal(data, cfg); err != nil {
+		if err := parseConfig(data, cfg); err != nil {
 			return fmt.Errorf("parsing config: %w", err)
 		}
 	}
