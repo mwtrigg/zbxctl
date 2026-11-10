@@ -156,11 +156,13 @@ func runBulk(cmd *cobra.Command, args []string, spec bulkSpec) error {
 		return output.Print(outFmt, cols, rows)
 	}
 
+	statePath := ""
 	if !bulkNoState {
 		path, err := writeState(spec.Name, steps)
 		if err != nil {
 			return cliFail(outFmt, fmt.Errorf("cannot save the before-state (use --no-state to skip): %w", err))
 		}
+		statePath = path
 		fmt.Fprintf(os.Stderr, "before-state saved: %s\n", path)
 	}
 
@@ -173,6 +175,11 @@ func runBulk(cmd *cobra.Command, args []string, spec bulkSpec) error {
 			break
 		}
 		applied = append(applied, s)
+	}
+
+	if applyErr != nil && len(applied) == 0 && statePath != "" {
+		_ = os.Remove(statePath) // nothing changed, so there is nothing to undo
+		fmt.Fprintln(os.Stderr, "nothing was changed; the before-state file was removed")
 	}
 
 	failedVerify := 0

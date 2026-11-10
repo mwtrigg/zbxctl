@@ -203,6 +203,9 @@ func DefaultFormat() Format { return FormatJSON }
 
 // cell renders list values compactly for table output.
 func cell(v any) any {
+	if v == nil {
+		return "-"
+	}
 	if l, ok := v.([]string); ok {
 		if len(l) == 0 {
 			return "-"

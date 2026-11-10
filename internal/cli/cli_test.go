@@ -95,7 +95,7 @@ func TestUserDeleteBlocks(t *testing.T) {
 
 func TestNormalizeProblemName(t *testing.T) {
 	p := resources.Problem{Name: "/boot is low on web-01 (below 700M)", Hosts: []string{"web-01"}}
-	if got := normalizeProblemName(p); got != "/boot is low on {HOST} (below 700M)" {
+	if got := normalizeProblemName(p); got != "/boot is low on <host> (below 700M)" {
 		t.Fatalf("got %q", got)
 	}
 }
@@ -139,5 +139,25 @@ func TestDisplayZoneRendersOffsetAndHandlesDST(t *testing.T) {
 	}
 	if err := setDisplayZone("Not/AZone"); err == nil || fmtUnix("1783000000") != "2026-07-02T13:46:40Z" {
 		t.Errorf("an unknown zone must fall back to UTC with a warning")
+	}
+}
+
+func TestFutureRelativeTimesLookAhead(t *testing.T) {
+	now := time.Now().Unix()
+	got, err := parseFutureTime("7d")
+	if err != nil || got-now < 7*86400-2 || got-now > 7*86400+2 {
+		t.Fatalf("7d from now, got %d (now %d) err=%v", got, now, err)
+	}
+	past, _ := parseTimestamp("7d")
+	if past >= now {
+		t.Fatal("parseTimestamp keeps meaning 'ago'")
+	}
+	if n, err := parseTimestamp("now"); err != nil || n-now > 2 {
+		t.Fatalf("now: %d %v", n, err)
+	}
+	for in, want := range map[string]time.Duration{"90": 90 * time.Minute, "30m": 30 * time.Minute, "2h": 2 * time.Hour, "1d": 24 * time.Hour} {
+		if d, err := parseDurationFlexible(in); err != nil || d != want {
+			t.Errorf("%s: %v %v", in, d, err)
+		}
 	}
 }

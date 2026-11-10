@@ -102,7 +102,9 @@ Export, diff and import of templates and hosts:
 zbxctl export template web-base --file web-base.yaml     # yaml | json | xml
 zbxctl diff template web-base.yaml                       # what an import would change, read-only
 zbxctl diff template --dir ./templates                   # the same for every export file in a directory
-zbxctl import template web-base.yaml --apply             # never deletes anything missing from the file
+zbxctl import template web-base.yaml --apply             # never deletes anything missing from the file; saves the previous export first
+zbxctl export template --dir ./templates --search Linux  # one file per template (hosts: --group <name> or --all)
+zbxctl import template --dir ./templates --expect 12 --apply
 ```
 
 Housekeeping: `version`, `upgrade [--check]`, `completion bash|zsh|fish|powershell`.

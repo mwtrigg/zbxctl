@@ -31,6 +31,7 @@ type HistoryQuery struct {
 	TimeFrom  int64
 	TimeTill  int64
 	Limit     int
+	Latest    bool // with Limit: the newest rows instead of the oldest
 	All       bool // page through the whole window instead of stopping at Limit
 	MaxRows   int  // safety cap for All (default 200000)
 }
@@ -93,7 +94,7 @@ func GetHistory(c *api.Client, q HistoryQuery) ([]HistoryRecord, error) {
 		if q.All {
 			raw, err = fetchHistoryAll(c, ids, vt, q.TimeFrom, q.TimeTill, q.MaxRows)
 		} else {
-			raw, err = fetchHistoryRaw(c, ids, vt, q.TimeFrom, q.TimeTill, q.Limit)
+			raw, err = fetchHistoryRawOrder(c, ids, vt, q.TimeFrom, q.TimeTill, q.Limit, q.Latest)
 		}
 		if err != nil {
 			return nil, err
@@ -179,12 +180,20 @@ func resolveItemRefs(c *api.Client, itemIDs, hostIDs, groupIDs []string, keySear
 
 // fetchHistoryRaw calls history.get for a single value_type.
 func fetchHistoryRaw(c *api.Client, itemIDs []string, valueType int, from, till int64, limit int) ([]rawHistoryRecord, error) {
+	return fetchHistoryRawOrder(c, itemIDs, valueType, from, till, limit, false)
+}
+
+func fetchHistoryRawOrder(c *api.Client, itemIDs []string, valueType int, from, till int64, limit int, latest bool) ([]rawHistoryRecord, error) {
+	order := "ASC"
+	if latest {
+		order = "DESC"
+	}
 	params := map[string]any{
 		"output":    "extend",
 		"itemids":   itemIDs,
 		"history":   valueType,
 		"sortfield": "clock",
-		"sortorder": "ASC",
+		"sortorder": order,
 	}
 	if from > 0 {
 		params["time_from"] = from

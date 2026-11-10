@@ -203,24 +203,33 @@ func ResolveMaintenance(c *api.Client, idOrName string) (*Maintenance, error) {
 // (Unix), changing active_till and the period length together so the window
 // stays consistent. Windows with recurring periods are refused.
 func SetMaintenanceEnd(c *api.Client, m *Maintenance, newTill int64) error {
-	if len(m.TimePeriods) != 1 || m.TimePeriods[0].Type != "0" {
-		return fmt.Errorf("maintenance %q is not a single one-time window; change it in Zabbix", m.Name)
+	if err := CheckMaintenanceEnd(m, newTill); err != nil {
+		return err
 	}
-	tp := m.TimePeriods[0]
-	start, err := strconv.ParseInt(tp.StartDate, 10, 64)
-	if err != nil {
-		return fmt.Errorf("parsing start_date %q: %w", tp.StartDate, err)
-	}
-	if newTill <= start {
-		return fmt.Errorf("the new end is not after the window start")
-	}
-	_, err = c.Call("maintenance.update", map[string]any{
+	start, _ := strconv.ParseInt(m.TimePeriods[0].StartDate, 10, 64)
+	_, err := c.Call("maintenance.update", map[string]any{
 		"maintenanceid": m.MaintenanceID,
 		"active_till":   newTill,
 		"timeperiods":   []map[string]any{{"timeperiod_type": 0, "start_date": start, "period": newTill - start}},
 	})
 	if err != nil {
 		return fmt.Errorf("maintenance.update: %w", err)
+	}
+	return nil
+}
+
+// CheckMaintenanceEnd says whether the end of m can move to newTill: the window
+// must be a single one-time period and the new end must come after its start.
+func CheckMaintenanceEnd(m *Maintenance, newTill int64) error {
+	if len(m.TimePeriods) != 1 || m.TimePeriods[0].Type != "0" {
+		return fmt.Errorf("maintenance %q is not a single one-time window; change it in Zabbix", m.Name)
+	}
+	start, err := strconv.ParseInt(m.TimePeriods[0].StartDate, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parsing start_date %q: %w", m.TimePeriods[0].StartDate, err)
+	}
+	if newTill <= start {
+		return fmt.Errorf("the new end %d is not after the window start: maintenance %q starts at %d", newTill, m.Name, start)
 	}
 	return nil
 }
