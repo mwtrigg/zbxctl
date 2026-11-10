@@ -400,3 +400,12 @@ func TestDeleteGroupGuards(t *testing.T) {
 		t.Fatalf("an empty group may be deleted: err=%v methods=%v", lastErr, methods)
 	}
 }
+
+func TestSecretMacroValueNeverFromCommandLine(t *testing.T) {
+	defer func() { extraResults = nil; smSecret, smValue = false, "" }()
+	extraResults = map[string]string{"host.get": `[{"hostid":"10","host":"web1","name":"W","status":"0"}]`}
+	_, methods := runCLI(t, "set", "macro", "--host", "web1", "--macro", "{$S}", "--secret", "--value", "hunter2", "--apply")
+	if lastErr == nil || slices.Contains(methods, "usermacro.create") {
+		t.Fatalf("a secret on the command line must be refused: err=%v methods=%v", lastErr, methods)
+	}
+}

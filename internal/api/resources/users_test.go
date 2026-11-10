@@ -408,3 +408,24 @@ func TestGetLostAndRuleCounts(t *testing.T) {
 		t.Fatalf("lost: %+v", lost)
 	}
 }
+
+func TestSetMacroCreatesThenUpdatesWithRightMethods(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"usermacro.get": `[]`, "usermacro.create": `{"hostmacroids":["1"]}`})
+	act, err := SetMacro(c, MacroInput{HostID: "10", Macro: "{$A}", Value: "v", Type: "0"})
+	if err != nil || act != "created" || (*calls)[1]["method"] != "usermacro.create" {
+		t.Fatalf("act=%q err=%v calls=%v", act, err, *calls)
+	}
+	if p := (*calls)[1]["params"].(map[string]any); p["hostid"] != "10" || p["macro"] != "{$A}" {
+		t.Fatalf("create params: %v", p)
+	}
+	c2, calls2 := newFake(t, map[string]string{"usermacro.get": `[{"hostmacroid":"5","hostid":"10","macro":"{$A}","value":"old","type":"0"}]`, "usermacro.update": `{"hostmacroids":["5"]}`})
+	act, err = SetMacro(c2, MacroInput{HostID: "10", Macro: "{$A}", Value: "new", Type: "0"})
+	p := (*calls2)[1]["params"].(map[string]any)
+	if err != nil || act != "updated" || p["hostmacroid"] != "5" || p["macro"] != nil {
+		t.Fatalf("act=%q err=%v params=%v", act, err, p)
+	}
+	c3, calls3 := newFake(t, map[string]string{"usermacro.get": `[]`, "usermacro.createglobal": `{"globalmacroids":["1"]}`})
+	if _, err := SetMacro(c3, MacroInput{Global: true, Macro: "{$G}", Value: "v", Type: "0"}); err != nil || (*calls3)[1]["method"] != "usermacro.createglobal" {
+		t.Fatalf("global create: %v %v", err, *calls3)
+	}
+}

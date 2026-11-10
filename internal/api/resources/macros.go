@@ -9,6 +9,8 @@ import (
 
 // Macro is a user macro. Secret macros come back without a value.
 type Macro struct {
+	ID          string // hostmacroid or globalmacroid
+	HostID      string
 	Macro       string
 	Value       string
 	Type        string // "0" text, "1" secret, "2" vault
@@ -30,7 +32,7 @@ func (m Macro) TypeLabel() string {
 // GetMacros returns host macros for hostIDs (all hosts when empty), or the
 // global macros when global is true.
 func GetMacros(c *api.Client, hostIDs []string, global bool, search string) ([]Macro, error) {
-	params := map[string]any{"output": []string{"macro", "value", "type", "description"}, "sortfield": "macro"}
+	params := map[string]any{"output": []string{"hostmacroid", "globalmacroid", "hostid", "macro", "value", "type", "description"}, "sortfield": "macro"}
 	if global {
 		params["globalmacro"] = true
 	} else {
@@ -47,11 +49,14 @@ func GetMacros(c *api.Client, hostIDs []string, global bool, search string) ([]M
 		return nil, fmt.Errorf("usermacro.get: %w", err)
 	}
 	var rs []struct {
-		Macro       string `json:"macro"`
-		Value       string `json:"value"`
-		Type        string `json:"type"`
-		Description string `json:"description"`
-		Hosts       []struct {
+		HostMacroID   string `json:"hostmacroid"`
+		GlobalMacroID string `json:"globalmacroid"`
+		HostID        string `json:"hostid"`
+		Macro         string `json:"macro"`
+		Value         string `json:"value"`
+		Type          string `json:"type"`
+		Description   string `json:"description"`
+		Hosts         []struct {
 			Host string `json:"host"`
 		} `json:"hosts"`
 	}
@@ -60,7 +65,7 @@ func GetMacros(c *api.Client, hostIDs []string, global bool, search string) ([]M
 	}
 	out := make([]Macro, len(rs))
 	for i, r := range rs {
-		out[i] = Macro{Macro: r.Macro, Value: r.Value, Type: r.Type, Description: r.Description}
+		out[i] = Macro{ID: firstNonEmptyStr(r.HostMacroID, r.GlobalMacroID), HostID: r.HostID, Macro: r.Macro, Value: r.Value, Type: r.Type, Description: r.Description}
 		if len(r.Hosts) > 0 {
 			out[i].Host = r.Hosts[0].Host
 		}
@@ -104,4 +109,86 @@ func GetActions(c *api.Client, limit int) ([]Action, error) {
 		out[i] = Action{ActionID: r.ActionID, Name: r.Name, EventSource: r.EventSource, Enabled: r.Status == "0", Conditions: len(r.Filter.Conditions)}
 	}
 	return out, nil
+}
+
+func firstNonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// FindMacro returns the macro with this exact name on a host (or among the
+// global macros), or nil.
+func FindMacro(c *api.Client, hostID string, global bool, name string) (*Macro, error) {
+	var ids []string
+	if !global {
+		ids = []string{hostID}
+	}
+	ms, err := GetMacros(c, ids, global, "")
+	if err != nil {
+		return nil, err
+	}
+	for i := range ms {
+		if ms[i].Macro == name {
+			return &ms[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// MacroInput is what SetMacro writes. Value is ignored for an existing secret
+// macro when Keep is true (the API cannot return it, so "no value given" means
+// "leave it").
+type MacroInput struct {
+	HostID      string
+	Global      bool
+	Macro       string
+	Value       string
+	Type        string // "0" text, "1" secret, "2" vault
+	Description *string
+}
+
+// SetMacro creates the macro or updates it if it exists, and returns "created" or "updated".
+func SetMacro(c *api.Client, in MacroInput) (string, error) {
+	existing, err := FindMacro(c, in.HostID, in.Global, in.Macro)
+	if err != nil {
+		return "", err
+	}
+	params := map[string]any{"macro": in.Macro, "value": in.Value, "type": in.Type}
+	if in.Description != nil {
+		params["description"] = *in.Description
+	}
+	var method, action string
+	switch {
+	case existing == nil && in.Global:
+		method, action = "usermacro.createglobal", "created"
+	case existing == nil:
+		method, action = "usermacro.create", "created"
+		params["hostid"] = in.HostID
+	case in.Global:
+		method, action = "usermacro.updateglobal", "updated"
+		delete(params, "macro")
+		params["globalmacroid"] = existing.ID
+	default:
+		method, action = "usermacro.update", "updated"
+		delete(params, "macro")
+		params["hostmacroid"] = existing.ID
+	}
+	if _, err := c.Call(method, params); err != nil {
+		return "", fmt.Errorf("%s: %w", method, err)
+	}
+	return action, nil
+}
+
+// DeleteMacro deletes a macro by its ID.
+func DeleteMacro(c *api.Client, id string, global bool) error {
+	method := "usermacro.delete"
+	if global {
+		method = "usermacro.deleteglobal"
+	}
+	if _, err := c.Call(method, []string{id}); err != nil {
+		return fmt.Errorf("%s: %w", method, err)
+	}
+	return nil
 }
