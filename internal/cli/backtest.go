@@ -33,6 +33,14 @@ var backtestCmd = &cobra.Command{
 	Long: `Replays a threshold condition over collected data and lists when it would have fired.
 
 Conditions: last>90, avg(5m)>90, min(10m)>=80, max(1h)<5, nodata(10m).
+
+Conditions can also compare items and shares of them. A call with a quoted key looks at that other
+item on the same host (its latest value is carried forward); "10% of X" means 0.10 * X; AND, OR,
+parentheses and + - * / work:
+
+  --when '(max(15m) - last) > 10% of last("vm.memory.size[total]") AND last("vm.memory.size[pavailable]") < 50'
+
+In that form the unquoted calls refer to the item given with --item.
 Use --source trends for long windows (hourly min/avg/max, kept for months).
 
 Give --real-problem <text> (a substring of the problem name) or --real-event <id> to compare
@@ -48,7 +56,7 @@ func init() {
 	f.StringVar(&btItem, "item", "", "item key pattern or numeric item ID (required)")
 	f.StringArrayVar(&btHosts, "host", nil, "host name or ID (repeatable)")
 	f.StringArrayVar(&btGroups, "group", nil, "host group name or ID (repeatable)")
-	f.StringVar(&btWhen, "when", "", "condition to replay, e.g. avg(5m)>90 (required)")
+	f.StringVar(&btWhen, "when", "", "condition to replay, e.g. avg(5m)>90, or an expression comparing items (required)")
 	f.StringVar(&btSince, "since", "7d", "start of the window: unix, RFC3339, YYYY-MM-DD or relative like 30d")
 	f.StringVar(&btUntil, "until", "", "end of the window (default now)")
 	f.StringVar(&btSource, "source", "history", "history | trends")
@@ -74,9 +82,16 @@ func runBacktest(cmd *cobra.Command, args []string) error {
 	if !numeric && len(btHosts) == 0 && len(btGroups) == 0 {
 		return cliPrintErr(outFmt, "a non-numeric --item needs at least one --host or --group", output.ExitUsage)
 	}
+	// Simple conditions (avg(5m)>90, nodata(10m)) use the original evaluator;
+	// anything else is parsed as an expression that can compare items.
 	cond, err := backtest.Parse(btWhen)
+	var expr *backtest.Expr
 	if err != nil {
-		return cliFail(outFmt, &usageError{err.Error()})
+		var eerr error
+		if expr, eerr = backtest.ParseExpr(btWhen); eerr != nil {
+			return cliFail(outFmt, &usageError{fmt.Sprintf("cannot read condition %q: %v\n(simple forms: last>90, avg(5m)>90, min(10m)>=80, max(1h)<5, nodata(10m); or an expression such as (max(15m) - last) > 10%% of last(\"vm.memory.size[total]\") AND last > 5)", btWhen, eerr)})
+		}
+		cond = backtest.Condition{Window: expr.Window()}
 	}
 	lead, err := parseWindow(btLead)
 	if err != nil || lead < 0 {
@@ -160,6 +175,55 @@ func runBacktest(cmd *cobra.Command, args []string) error {
 		return cliFail(outFmt, fmt.Errorf("no data for %q in the window; nothing to replay", btItem))
 	}
 
+	// Other items the expression refers to, per host.
+	refs := map[string]map[string][]backtest.Sample{} // hostID -> key -> samples
+	if expr != nil && len(expr.Keys()) > 0 {
+		hostSet := map[string]bool{}
+		var hosts []string
+		for _, sr := range byItem {
+			if !hostSet[sr.hostID] {
+				hostSet[sr.hostID] = true
+				hosts = append(hosts, sr.hostID)
+			}
+		}
+		for _, key := range expr.Keys() {
+			if btSource == "trends" {
+				recs, err := resources.GetTrends(c, resources.TrendQuery{HostIDs: hosts, KeySearch: key, TimeFrom: fetchFrom, TimeTill: until})
+				if err != nil {
+					return cliFail(outFmt, fmt.Errorf("item %q used in the condition: %w", key, err))
+				}
+				for _, r := range recs {
+					if r.Key != key {
+						continue
+					}
+					f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
+					if refs[r.HostID] == nil {
+						refs[r.HostID] = map[string][]backtest.Sample{}
+					}
+					refs[r.HostID][key] = append(refs[r.HostID][key], backtest.Sample{T: r.ClockUnix, V: f(r.Avg), Min: f(r.Min), Max: f(r.Max), Num: f(r.Num), Trend: true})
+				}
+				continue
+			}
+			recs, err := resources.GetHistory(c, resources.HistoryQuery{HostIDs: hosts, KeySearch: key, TimeFrom: fetchFrom, TimeTill: until, All: true})
+			if err != nil {
+				return cliFail(outFmt, fmt.Errorf("item %q used in the condition: %w", key, err))
+			}
+			for _, r := range recs {
+				if r.Key != key { // KeySearch is a substring match; the condition names one exact key
+					continue
+				}
+				v, err := strconv.ParseFloat(r.Value, 64)
+				if err != nil {
+					return cliPrintErr(outFmt, fmt.Sprintf("item %s used in the condition has non-numeric values", key), output.ExitUsage)
+				}
+				if refs[r.HostID] == nil {
+					refs[r.HostID] = map[string][]backtest.Sample{}
+				}
+				refs[r.HostID][key] = append(refs[r.HostID][key], backtest.Sample{T: r.ClockUnix, V: v})
+			}
+		}
+	}
+
 	// Real problems to judge against (optional).
 	judge := btRealProblem != "" || len(btRealEvents) > 0
 	realByHost := map[string][]backtest.Period{}
@@ -197,7 +261,21 @@ func runBacktest(cmd *cobra.Command, args []string) error {
 	sort.Strings(order)
 	for _, id := range order {
 		sr := byItem[id]
-		fires := backtest.Evaluate(sr.samples, cond, since, until)
+		var fires []backtest.Period
+		if expr != nil {
+			series := map[string][]backtest.Sample{"": sr.samples}
+			for k, v := range refs[sr.hostID] {
+				series[k] = v
+			}
+			for _, k := range expr.Keys() {
+				if len(series[k]) == 0 {
+					return cliFail(outFmt, fmt.Errorf("item %q used in the condition has no data on host %s in the window", k, sr.host))
+				}
+			}
+			fires = backtest.EvaluateExpr(expr, series, since, until)
+		} else {
+			fires = backtest.Evaluate(sr.samples, cond, since, until)
+		}
 		var verdicts []backtest.Verdict
 		var missed []int
 		real := realByHost[sr.hostID]
@@ -208,6 +286,9 @@ func runBacktest(cmd *cobra.Command, args []string) error {
 			row := map[string]any{
 				"host": sr.host, "key_": sr.key, "from": fmtT(f.Start), "to": fmtT(f.End),
 				"minutes": float64(f.End-f.Start) / 60, "peak": f.Peak, "still_firing": f.Open,
+			}
+			if expr != nil {
+				row["low"] = f.Low
 			}
 			if judge {
 				v := verdicts[i]

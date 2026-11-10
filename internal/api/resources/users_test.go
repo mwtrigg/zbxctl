@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
 	"github.com/mwtrigg/zbxctl/internal/config"
@@ -472,5 +473,50 @@ func TestAuditLogParams(t *testing.T) {
 	}
 	if p["sortfield"] != "clock" || p["sortorder"] != "DESC" {
 		t.Fatalf("must be newest first: %v", p)
+	}
+}
+
+func hourlyTrend(item string, t time.Time, num, min, avg, max string) TrendRecord {
+	return TrendRecord{ItemID: item, Host: "h", Key: "k", ClockUnix: t.Unix(), Clock: strconv.FormatInt(t.Unix(), 10), Num: num, Min: min, Avg: avg, Max: max}
+}
+
+func TestRollupTrendsDayWeightedAndDST(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("tz database not available")
+	}
+	// 2026-03-08 is the spring-forward day in New York: it has 23 hours.
+	day := time.Date(2026, 3, 8, 0, 0, 0, 0, ny)
+	var recs []TrendRecord
+	for h := 0; h < 23; h++ {
+		recs = append(recs, hourlyTrend("1", day.Add(time.Duration(h)*time.Hour), "60", "10", "20", "30"))
+	}
+	recs = append(recs, hourlyTrend("1", day.Add(5*time.Hour), "60", "2", "20", "99")) // an extra bucket with the day's extremes
+	next := time.Date(2026, 3, 9, 0, 0, 0, 0, ny)
+	recs = append(recs, hourlyTrend("1", next, "30", "1", "50", "60"))
+	got, err := RollupTrends(recs, "day", ny)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("got %+v err=%v", got, err)
+	}
+	d := got[0]
+	if d.ClockUnix != day.Unix() || d.Min != "2" || d.Max != "99" || d.Num != "1440" {
+		t.Fatalf("23-hour day (24 buckets here): %+v", d)
+	}
+	if got[1].ClockUnix != next.Unix() || got[1].Avg != "50" || got[1].Min != "1" {
+		t.Fatalf("next day: %+v", got[1])
+	}
+	// weighted average: 60 samples at 10 and 30 samples at 40 -> (600+1200)/90 = 20
+	w, _ := RollupTrends([]TrendRecord{hourlyTrend("1", day, "60", "0", "10", "20"), hourlyTrend("1", day.Add(time.Hour), "30", "0", "40", "80")}, "day", ny)
+	if w[0].Avg != "20" {
+		t.Fatalf("avg must be weighted by sample count: %+v", w[0])
+	}
+	// weeks start on Monday
+	mon := time.Date(2026, 3, 9, 0, 0, 0, 0, ny)
+	wk, _ := RollupTrends([]TrendRecord{hourlyTrend("1", day, "60", "1", "1", "1"), hourlyTrend("1", mon.Add(3*24*time.Hour), "60", "1", "1", "1")}, "week", ny)
+	if len(wk) != 2 || wk[1].ClockUnix != mon.Unix() {
+		t.Fatalf("week buckets: %+v", wk)
+	}
+	if _, err := RollupTrends(recs, "year", ny); err == nil {
+		t.Fatal("unknown period must be refused")
 	}
 }
