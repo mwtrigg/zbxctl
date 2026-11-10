@@ -8,13 +8,15 @@ Zabbix versions (8.x) is worked out.
 
 ## [0.2.0]
 
-### Security
+### Guardrails and fixes (zbxctl is a guardrail, not a security boundary: see the README)
 - MCP: the arguments an agent sends are positional values only. They follow a `--` separator and a value that
   starts with `-` is refused, so they can no longer become flags such as `--yes`, `--id-file`, `--no-state`,
   `--state-dir` or `-c`; the server's environment pins the context (`context` is not offered); the child process
   refuses every flag the server never offers; results are marked as untrusted data; `api call` is not offered.
 - Permission tiers and config fail closed: an unknown tier, a context named with `-c` or `ZBXCTL_CONTEXT` that is
-  not in the file, and an unknown config key are errors (a typo used to mean full write access).
+  not in the file, and an unknown config key are errors (a typo used to mean full write access); a connection with no
+  `permissions` set is `readonly` (`ZBXCTL_PERMISSIONS=write` or `permissions: write` allows changes); the MCP server
+  pins its context when it starts.
 - `run script` needs the operator tier, its allowlist entries are pinned to the script's command
   (`name@sha256:<hash>`), the confirmation token is read from the terminal, and the printed command shows control
   characters instead of acting on them.
@@ -25,6 +27,11 @@ Zabbix versions (8.x) is worked out.
   cannot be passed off as a new one.
 - Table output shows control characters as visible escapes; exports are written 0600; warnings for a plain `http://`
   URL and for a world-readable config file that holds credentials.
+
+### Added
+- `zbxctl auth check` compares the permission tier you declared with the role of the token's user in Zabbix (no change
+  is made) and warns when the tier is stronger than what the server enforces.
+- A threat-model section in the README and SECURITY.md: real enforcement is a least-privilege Zabbix token.
 
 ### Fixed
 - `update host --remove-template` only unlinks. It used to send `templates_clear`, which also deletes the items,

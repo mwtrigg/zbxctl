@@ -66,6 +66,32 @@ zbxctl get problems --severity high --since 24h        # --severity is a minimum
 zbxctl diagnose host web-01                         # one call: problems, events, data, broken items
 ```
 
+## What this protects, and what really enforces access
+
+zbxctl is a **guardrail**, not a security boundary. The dry run, the permission tiers, the audit trail,
+the `run script` allowlist and the MCP server's tool list exist to stop mistakes: yours, a script's, an
+agent's confused or misled step. They are checked by zbxctl, which runs as your user and reads your config
+and token. Anything else that runs as your user (an agent with a shell, a script, `curl`) can skip zbxctl
+and call the Zabbix API with the same token. So:
+
+- **Real enforcement is the Zabbix side**: the role and the user group rights of the user the token
+  belongs to. Zabbix refuses what that user may not do, whatever client asks.
+- **Give agents their own token**, of a user with the **User** role whose user groups have **read-only**
+  access to the host groups it should see. Keep Admin and Super admin tokens out of any context an agent can
+  use. In the config, label that context `permissions: readonly`.
+- **`zbxctl auth check`** reads the token's role (it changes nothing) and warns when the tier you declared
+  is stronger than what Zabbix enforces, for example a `readonly` context whose token is a Super admin.
+
+| Zabbix role of the token's user | What Zabbix lets it do | Matching zbxctl tier |
+|---|---|---|
+| **User**, groups with read-only rights | read what those groups hold; acknowledge, suppress and comment on problems if the role allows it; no configuration changes | `readonly` (or `operator` if it should acknowledge) |
+| **User**, groups with read-write rights | the above, and change the objects of those groups only where the role allows | `operator` |
+| **Admin** | change the configuration of the groups it has read-write rights to (hosts, items, triggers, templates it can reach), not users or global settings | `write` |
+| **Super admin** | everything, including users, tokens, scripts and settings | `write`, with care |
+
+zbxctl's tier can be *weaker* than the role (a Super admin token in a `readonly` context stops zbxctl from
+writing, and only zbxctl) but never stronger: it cannot give a token powers Zabbix has not granted.
+
 ## Safe by default
 
 | What you do | What happens |
@@ -76,7 +102,7 @@ zbxctl diagnose host web-01                         # one call: problems, events
 | `--apply` on a change | Saves a **before-state file** (what was done, what the target looked like before), applies the changes one by one, then re-reads each target to **verify** it. |
 | `delete user` | Refuses `Admin` and the user that owns the credentials in use. |
 | Secrets | Passwords and secret macro values come from a file or stdin, never a flag; secret values are never printed or saved. |
-| `run script` | Needs the operator tier, the script on an allowlist pinned to its whole definition (`name@sha256:<hash>` of the command, where it runs, its parameters and user, so an edited script is refused; scripts that use `{$MACROS}` are refused), and a one-time code typed at a terminal. **This is a guard against accidents and casual automation, not a barrier against a program running as your user**: such a program can allocate a terminal, read the code and type it back. Do not set `allowed_scripts` on a context that an agent's OS user can use. Over MCP it does not exist. |
+| `run script` | Opt-in per context (`allowed_scripts`), operator tier, the script pinned to its whole definition (`name@sha256:<hash>`: command, where it runs, parameters, user; an edited script is refused, and so is one that uses `{$MACROS}`), and a one-time code typed at a terminal. It stops accidents and casual automation; **it is not a barrier against a program running as your user**, which can allocate a terminal and type the code back. Do not set `allowed_scripts` on a context an agent can use. The MCP server does not offer it. |
 
 **Applying by default.** The dry run is the right default for agents and for a first look, and tedious for a person who knows what they are doing. For a connection you trust, set `mode: apply` in the config (or `ZBXCTL_MODE=apply`): changes then happen without `--apply`, and `--dry-run` previews one command. Everything else still protects you: bulk targets are all resolved first, `--expect` still guards, the before-state file is still saved and the result is still verified, `delete user` still refuses `Admin`, and `run script` still needs its allowlist and confirmation code. `state prune` deletes audit files, so it always needs an explicit `--apply`. `zbxctl auth status` shows the mode of the connection in use. **The MCP server ignores this setting**: an agent calling it always gets a dry run unless it passes `apply: true`.
 
@@ -214,7 +240,7 @@ zbxctl delete lost items --host web-01 --expect 3 --apply     # only objects dis
   {"mcpServers": {"zabbix": {"command": "zbxctl", "args": ["mcp"], "env": {"ZBXCTL_CONTEXT": "lab"}}}}
   ```
 
-  By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each is still a dry run until the call passes `apply: true` (even if your config says `mode: apply`). Never offered: `run script`, `api call`, `upgrade`, `context use`, `state prune`, and anything that works on a file path. Results are marked as untrusted data, and the arguments an agent sends are positional values only: they cannot become flags.
+  The MCP server is a convenience and a set of guardrails, not an access control (see [What this protects](#what-this-protects-and-what-really-enforces-access)): an agent that can run commands as you can skip it. Use a least-privilege token for the context it uses. By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each is still a dry run until the call passes `apply: true` (even if your config says `mode: apply`). Never offered: `run script`, `api call`, `upgrade`, `context use`, `state prune`, and anything that works on a file path. Results are marked as untrusted data, and the arguments an agent sends are positional values only, so they cannot turn into flags by accident.
 
 ## Configuration
 

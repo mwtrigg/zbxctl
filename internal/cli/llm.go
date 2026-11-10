@@ -38,6 +38,13 @@ var capabilities = []CommandSchema{
 		Examples:     []string{"zbxctl auth status", "zbxctl auth status --output json"},
 	},
 	{
+		Command:      "auth check",
+		Description:  "Compare the permission tier declared for this connection with what the Zabbix token's role allows (reads the role; changes nothing). Warns when a readonly or operator context has a token that could change the configuration through any other client.",
+		Flags:        globalFlags(),
+		OutputFields: []string{"user", "role", "role_type", "declared_tier", "can_change_configuration", "ok", "note"},
+		Examples:     []string{"zbxctl auth check", "zbxctl -c agent-ro auth check"},
+	},
+	{
 		Command:      "context list",
 		Description:  "List all contexts defined in the config file.",
 		Flags:        globalFlags(),

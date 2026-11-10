@@ -382,7 +382,9 @@ var mcpCmd = &cobra.Command{
 Every tool call runs zbxctl itself, so the Zabbix URL and token come from the config file or
 environment of the process that started this server; the agent never sees them.
 
-By default only commands that cannot change anything are offered. With --allow-writes the write
+This server is a convenience and a set of guardrails, not an access control: an agent that can
+run commands as you can skip it, so give the context it uses a least-privilege Zabbix token
+(see the README). By default only commands that cannot change anything are offered. With --allow-writes the write
 commands are offered too, and each is still a dry run until the call passes apply=true. Never
 offered: run script, upgrade, context use, state prune, and anything that works
 on a file path (export, import, diff).

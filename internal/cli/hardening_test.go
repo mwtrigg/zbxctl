@@ -510,3 +510,46 @@ func TestAPICallRefusesMoreCodeRunningCreators(t *testing.T) {
 		t.Fatalf("export is a read and stays allowed: %v", err)
 	}
 }
+
+func TestAuthCheckWarnsWhenTheTierIsStrongerThanTheRole(t *testing.T) {
+	roleReply := func(roleType, name string) func(rpcCall) fakeReply {
+		return func(c rpcCall) fakeReply {
+			switch c.Method {
+			case "user.checkAuthentication":
+				return fakeReply{Result: `{"userid":"7","username":"agent"}`}
+			case "user.get":
+				return fakeReply{Result: `[{"userid":"7","username":"agent","role":{"roleid":"3","name":"` + name + `","type":"` + roleType + `"}}]`}
+			}
+			return fakeReply{}
+		}
+	}
+	type row struct {
+		Data []map[string]any `json:"data"`
+	}
+	run := func(f *fakeZabbix) map[string]any {
+		out, err := runFake(t, f, "auth", "check")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var r row
+		if err := json.Unmarshal([]byte(out), &r); err != nil || len(r.Data) != 1 {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		return r.Data[0]
+	}
+	// a readonly context whose token belongs to a Super admin: warn
+	d := run(&fakeZabbix{Handler: roleReply("3", "Super admin role"), Context: "permissions: readonly"})
+	if d["ok"] != false || !strings.Contains(d["note"].(string), "enforced only by zbxctl") || d["can_change_configuration"] != true {
+		t.Fatalf("must warn: %v", d)
+	}
+	// a readonly context whose token is a User role: fine
+	d = run(&fakeZabbix{Handler: roleReply("1", "User role"), Context: "permissions: readonly"})
+	if d["ok"] != true || d["note"] != "" {
+		t.Fatalf("a user role under readonly is what we want: %v", d)
+	}
+	// a write context with a user role: ok, with a note that Zabbix will refuse most writes
+	d = run(&fakeZabbix{Handler: roleReply("1", "User role"), Context: "permissions: write"})
+	if d["ok"] != true || !strings.Contains(d["note"].(string), "cannot change the configuration") {
+		t.Fatalf("%v", d)
+	}
+}
