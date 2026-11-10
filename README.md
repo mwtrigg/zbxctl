@@ -71,6 +71,7 @@ get hosts | host | items | latestdata | history | trends | interfaces
 get triggers | problems | events | alerts
 get discovery | lost items | lost triggers
 get templates | template | groups | users | user | usergroups | scripts | macros | actions
+backtest --item k --when 'avg(5m)>90'   # replay an alert idea over history/trends; judge it against real problems
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
 diagnose trigger <id>|<event> --event   # why a problem is open: disabled trigger/host/items, unsupported items, suppression, manual close off
 auth status | context list | context use <name>
@@ -85,6 +86,7 @@ maintenance list | create | extend | shorten | delete
 create host | update host | delete host
 tag host <host> --tag k [--value v]   untag host <host> --tag k [--value v]
 create user | delete user | create usergroup | delete usergroup
+delete template <name> [--allow-linked]   # before-state keeps a full export
 delete lost items|triggers [--host h] [--close-problems]   # only objects that discovery lost
 import template|host <file>       # without --apply: shows the diff only
 run script <name> --host <host>   # dangerous: executes code on a monitored host
@@ -106,6 +108,8 @@ zbxctl import template web-base.yaml --apply             # never deletes anythin
 Housekeeping: `version`, `upgrade [--check]`, `completion bash|zsh|fish|powershell`.
 
 `--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `get problems` triage flags: `--exclude-orphans` drops problems that can never recover (trigger, host or all items disabled), `--suppressed true|false` and `--maintenance` filter on suppression, `--group-by name` collapses the same alert across hosts into one row with a count, the hosts and the event IDs (handy for `acknowledge`).
+
+Backtesting an alert idea: `zbxctl backtest --host web-01 --item system.cpu.util --when 'avg(5m)>90' --since 7d` lists when the condition would have fired (conditions: `last>N`, `avg(5m)>N`, `min(10m)>=N`, `max(1h)<N`, `nodata(10m)`). Add `--real-problem "CPU is high"` (or `--real-event ID`) to judge each fire against real problems on the same host: true alert with its lead time in minutes, false alarm, and missed problems; `--summary` gives one row per host. Use `--source trends` for year-long windows.
 
 History and trends: `get history --all` pages through a whole window (no 100-row stop), `--step 5m` keeps one value per bucket, `--gaps-over 10m` lists the silences instead of the samples; `get trends` returns hourly min/avg/max of numeric items for baselines and long look-backs.
 

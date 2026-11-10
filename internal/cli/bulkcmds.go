@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -317,11 +318,74 @@ func init() {
 		{Name: "no-state", Type: "bool", Description: "Do not write a before-state file.", Default: false},
 		{Name: "no-verify", Type: "bool", Description: "Skip re-reading each target after the change.", Default: false},
 	}
-	bulk := map[string]bool{"enable host": true, "disable host": true, "enable trigger": true, "disable trigger": true, "acknowledge": true, "maintenance delete": true, "maintenance extend": true, "maintenance shorten": true, "delete host": true, "delete lost items": true, "delete lost triggers": true}
+	bulk := map[string]bool{"enable host": true, "disable host": true, "enable trigger": true, "disable trigger": true, "acknowledge": true, "maintenance delete": true, "maintenance extend": true, "maintenance shorten": true, "delete host": true, "delete template": true, "delete lost items": true, "delete lost triggers": true}
 	for i := range capabilities {
 		if bulk[capabilities[i].Command] {
 			capabilities[i].Flags = append(capabilities[i].Flags, extra...)
 			capabilities[i].Description += " Accepts several targets; with --apply it saves a before-state file and verifies each change."
 		}
 	}
+}
+
+var tplAllowLinked bool
+
+// deleteTemplateSpec deletes templates. A template still linked to hosts or
+// other templates is refused unless --allow-linked, and the before-state file
+// holds the template's full export so it can be re-imported.
+func deleteTemplateSpec() bulkSpec {
+	return bulkSpec{
+		Name: "delete-template", Tier: "write",
+		Cols: []output.Column{{Key: "templateid", Header: "TEMPLATE_ID"}, {Key: "host", Header: "TEMPLATE"}, {Key: "name", Header: "NAME"}, {Key: "status", Header: "STATUS"}},
+		Prepare: func(c *api.Client, target string) (*step, error) {
+			t, err := resources.GetTemplate(c, target)
+			if err != nil {
+				return nil, err
+			}
+			links, err := resources.GetTemplateLinks(c, t.TemplateID)
+			if err != nil {
+				return nil, err
+			}
+			desc := fmt.Sprintf("delete template %q (%s)", t.Name, t.Host)
+			if n := len(links.Hosts) + len(links.Templates); n > 0 {
+				if !tplAllowLinked {
+					return nil, &usageError{fmt.Sprintf("template %q is still linked to %d host(s) and %d template(s) (%s); deleting it unlinks them. Pass --allow-linked to go ahead",
+						t.Name, len(links.Hosts), len(links.Templates), strings.Join(append(append([]string{}, links.Hosts...), links.Templates...), ", "))}
+				}
+				desc += fmt.Sprintf(" and unlink it from %d host(s) and %d template(s)", len(links.Hosts), len(links.Templates))
+			}
+			export, err := resources.ExportConfig(c, "templates", t.TemplateID, "yaml")
+			if err != nil {
+				return nil, fmt.Errorf("cannot export the template for the before-state: %w", err)
+			}
+			return &step{
+				Key: t.TemplateID, Desc: desc,
+				Before: map[string]any{"templateid": t.TemplateID, "host": t.Host, "name": t.Name, "linked_hosts": links.Hosts, "linked_templates": links.Templates, "export_yaml": export},
+				Apply:  func() error { return resources.DeleteTemplate(c, t.TemplateID) },
+				Verify: func() error {
+					_, err := resources.GetTemplate(c, t.TemplateID)
+					var nfe *resources.NotFoundError
+					if errors.As(err, &nfe) {
+						return nil
+					}
+					if err != nil {
+						return err
+					}
+					return errors.New("template still exists")
+				},
+				Row: map[string]any{"templateid": t.TemplateID, "host": t.Host, "name": t.Name, "status": "deleted"},
+			}, nil
+		},
+	}
+}
+
+func init() {
+	cmd := &cobra.Command{
+		Use:   "template <id|name>...",
+		Short: "Delete templates (refuses linked ones unless --allow-linked; the before-state file keeps a full export)",
+		Args:  cobra.ArbitraryArgs,
+		RunE:  func(cmd *cobra.Command, args []string) error { return runBulk(cmd, args, deleteTemplateSpec()) },
+	}
+	cmd.Flags().BoolVar(&tplAllowLinked, "allow-linked", false, "delete even if hosts or templates still use it (it is unlinked from them)")
+	addBulkFlags(cmd)
+	deleteCmd.AddCommand(cmd)
 }

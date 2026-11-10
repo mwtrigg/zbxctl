@@ -191,6 +191,7 @@ func PrintError(format Format, msg string, code int) {
 	switch format {
 	case FormatJSON, FormatJSONL:
 		enc := json.NewEncoder(os.Stderr)
+		enc.SetEscapeHTML(false)
 		_ = enc.Encode(map[string]any{"error": msg, "kind": KindFor(code), "code": code})
 	default:
 		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
