@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
 )
@@ -92,5 +94,81 @@ func GetTrends(c *api.Client, q TrendQuery) ([]TrendRecord, error) {
 			Clock: r.Clock, ClockUnix: ts, Num: r.Num, Min: r.Min, Avg: r.Avg, Max: r.Max})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ClockUnix < out[j].ClockUnix })
+	return out, nil
+}
+
+// RollupTrends folds hourly trend buckets into days, weeks or months. A bucket
+// starts at midnight in loc (weeks on Monday), so a day that has 23 or 25 hours
+// because of daylight saving still rolls up as one day. Min is the lowest
+// hourly minimum, Max the highest hourly maximum, Avg is weighted by how many
+// samples each hour held, and Num is the total sample count.
+func RollupTrends(recs []TrendRecord, period string, loc *time.Location) ([]TrendRecord, error) {
+	start := func(t time.Time) time.Time {
+		y, m, d := t.In(loc).Date()
+		switch period {
+		case "day":
+			return time.Date(y, m, d, 0, 0, 0, 0, loc)
+		case "week":
+			day := time.Date(y, m, d, 0, 0, 0, 0, loc)
+			back := (int(day.Weekday()) + 6) % 7 // Monday = 0
+			return time.Date(y, m, d-back, 0, 0, 0, 0, loc)
+		case "month":
+			return time.Date(y, m, 1, 0, 0, 0, 0, loc)
+		}
+		return time.Time{}
+	}
+	if period != "day" && period != "week" && period != "month" {
+		return nil, fmt.Errorf("invalid rollup %q: use day, week or month", period)
+	}
+	type acc struct {
+		rec          TrendRecord
+		min, max     float64
+		sum, samples float64
+		started      bool
+	}
+	byKey := map[string]*acc{}
+	var order []string
+	for _, r := range recs {
+		b := start(time.Unix(r.ClockUnix, 0))
+		key := r.ItemID + "/" + strconv.FormatInt(b.Unix(), 10)
+		a := byKey[key]
+		min, _ := strconv.ParseFloat(r.Min, 64)
+		max, _ := strconv.ParseFloat(r.Max, 64)
+		avg, _ := strconv.ParseFloat(r.Avg, 64)
+		num, _ := strconv.ParseFloat(r.Num, 64)
+		if a == nil {
+			a = &acc{rec: TrendRecord{ItemID: r.ItemID, HostID: r.HostID, Host: r.Host, Key: r.Key, ClockUnix: b.Unix(), Clock: strconv.FormatInt(b.Unix(), 10)}}
+			byKey[key] = a
+			order = append(order, key)
+		}
+		if !a.started || min < a.min {
+			a.min = min
+		}
+		if !a.started || max > a.max {
+			a.max = max
+		}
+		a.started = true
+		a.sum += avg * num
+		a.samples += num
+	}
+	out := make([]TrendRecord, 0, len(order))
+	f := func(v float64) string { return strconv.FormatFloat(v, 'f', -1, 64) }
+	for _, k := range order {
+		a := byKey[k]
+		a.rec.Min, a.rec.Max, a.rec.Num = f(a.min), f(a.max), f(a.samples)
+		if a.samples > 0 {
+			a.rec.Avg = strconv.FormatFloat(a.sum/a.samples, 'f', 4, 64)
+			a.rec.Avg = strings.TrimRight(strings.TrimRight(a.rec.Avg, "0"), ".")
+		} else {
+			a.rec.Avg = "0"
+		}
+		out = append(out, a.rec)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].ClockUnix != out[j].ClockUnix {
+			return out[i].ClockUnix < out[j].ClockUnix
+		}
+		return out[i].ItemID < out[j].ItemID
+	})
 	return out, nil
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -95,6 +96,7 @@ var (
 	trendSince  string
 	trendUntil  string
 	trendLimit  int
+	trendRollup string
 )
 
 var getTrendsCmd = &cobra.Command{
@@ -112,6 +114,7 @@ func init() {
 	f.StringVar(&trendSince, "since", "", "start: unix, RFC3339, YYYY-MM-DD, or 30d")
 	f.StringVar(&trendUntil, "until", "", "end: unix, RFC3339, YYYY-MM-DD, or 1d")
 	f.IntVar(&trendLimit, "limit", 0, "max rows (default: all in the window)")
+	f.StringVar(&trendRollup, "rollup", "", "fold the hourly buckets into day, week (Monday start) or month, in the --tz zone")
 	getCmd.AddCommand(getTrendsCmd)
 }
 
@@ -159,8 +162,17 @@ func runGetTrends(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return cliFail(outFmt, err)
 	}
+	if trendRollup != "" {
+		if recs, err = resources.RollupTrends(recs, trendRollup, displayLoc); err != nil {
+			return cliFail(outFmt, &usageError{err.Error()})
+		}
+	}
+	periodHeader := "HOUR"
+	if trendRollup != "" {
+		periodHeader = strings.ToUpper(trendRollup)
+	}
 	cols := []output.Column{
-		{Key: "host", Header: "HOST"}, {Key: "key_", Header: "KEY"}, {Key: "clock", Header: "HOUR"},
+		{Key: "host", Header: "HOST"}, {Key: "key_", Header: "KEY"}, {Key: "clock", Header: periodHeader},
 		{Key: "num", Header: "SAMPLES"}, {Key: "min", Header: "MIN"}, {Key: "avg", Header: "AVG"}, {Key: "max", Header: "MAX"},
 	}
 	rows := make([]map[string]any, len(recs))

@@ -59,6 +59,11 @@ type Client struct {
 	endpoint    string
 	bearerToken string // pre-auth header token (api_token or session token)
 
+	// Version is the server's version: pinned by the api_version setting, or
+	// detected with apiinfo.version. VersionSource says which ("pinned" or "detected").
+	Version       Version
+	VersionSource string
+
 	// Filters are exact-match KEY=VALUE pairs (--filter) merged into the API
 	// "filter" object of list calls made through CallList.
 	Filters map[string][]string
@@ -97,6 +102,13 @@ func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 	c := &Client{
 		httpClient: httpClient,
 		endpoint:   endpoint,
+	}
+	if cfg.APIVersion != "" {
+		v, err := ParseVersion(cfg.APIVersion)
+		if err != nil {
+			return nil, fmt.Errorf("api_version: %w", err)
+		}
+		c.Version, c.VersionSource = v, "pinned"
 	}
 
 	if cfg.APIToken != "" {
@@ -298,4 +310,21 @@ func buildTransport(cfg *config.Context) (http.RoundTripper, error) {
 	}
 
 	return transport, nil
+}
+
+// DetectVersion asks the server for its version (no authentication needed) and
+// records it unless one was pinned.
+func (c *Client) DetectVersion() (Version, error) {
+	raw, err := c.APIVersion()
+	if err != nil {
+		return Version{}, err
+	}
+	v, err := ParseVersion(raw)
+	if err != nil {
+		return Version{}, err
+	}
+	if c.Version.IsZero() {
+		c.Version, c.VersionSource = v, "detected"
+	}
+	return v, nil
 }

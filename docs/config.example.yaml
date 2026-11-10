@@ -10,8 +10,11 @@ contexts:
     ca_file: ""
     proxy: ""
     default_limit: 100
+    api_version: ""         # pin the Zabbix version, e.g. "7.4" or "8.0"; empty = detect (7.4 and newer)
     permissions: write      # readonly | operator | write (default write)
     allowed_scripts: []     # names or IDs `run script` may execute; empty = blocked
+    before_state: true      # save a before-state file for bulk writes under --apply (default true)
+    state_dir: ""           # where they go; empty = ~/.local/state/zbxctl
 
   staging:
     url: https://zabbix-staging.example.com

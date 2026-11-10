@@ -328,7 +328,7 @@ func init() {
 		{Name: "no-state", Type: "bool", Description: "Do not write a before-state file.", Default: false},
 		{Name: "no-verify", Type: "bool", Description: "Skip re-reading each target after the change.", Default: false},
 	}
-	bulk := map[string]bool{"enable host": true, "disable host": true, "enable trigger": true, "disable trigger": true, "acknowledge": true, "maintenance delete": true, "maintenance extend": true, "maintenance shorten": true, "delete host": true, "delete template": true, "delete lost items": true, "delete lost triggers": true}
+	bulk := map[string]bool{"enable host": true, "disable host": true, "enable trigger": true, "disable trigger": true, "acknowledge": true, "unacknowledge": true, "suppress": true, "unsuppress": true, "maintenance delete": true, "maintenance extend": true, "maintenance shorten": true, "delete host": true, "delete template": true, "delete group": true, "delete valuemap": true, "delete regexp": true, "delete item": true, "delete trigger": true, "delete macro": true, "delete lost items": true, "delete lost triggers": true}
 	for i := range capabilities {
 		if bulk[capabilities[i].Command] {
 			capabilities[i].Flags = append(capabilities[i].Flags, extra...)

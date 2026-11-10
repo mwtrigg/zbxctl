@@ -108,7 +108,7 @@ var (
 
 var acknowledgeCmd = &cobra.Command{
 	Use:   "acknowledge <event-id>",
-	Short: "Acknowledge an event",
+	Short: "Acknowledge an event (and optionally close it or change its severity); see also unacknowledge, suppress, unsuppress",
 	Args:  cobra.ArbitraryArgs,
 	RunE:  runAcknowledge,
 }
@@ -120,6 +120,9 @@ func init() {
 	acknowledgeCmd.Flags().BoolVar(&ackSuppress, "suppress", false, "suppress the problem (hide it from the problem list)")
 	acknowledgeCmd.Flags().StringVar(&ackSuppressUntil, "until", "", "with --suppress: suppress until this time (unix, RFC3339, YYYY-MM-DD, or from now like 24h, 7d); default indefinitely")
 	acknowledgeCmd.Flags().BoolVar(&ackUnsuppress, "unsuppress", false, "lift a suppression")
+	for flag, verb := range map[string]string{"unacknowledge": "unacknowledge", "suppress": "suppress", "unsuppress": "unsuppress", "until": "suppress --until"} {
+		_ = acknowledgeCmd.Flags().MarkDeprecated(flag, "use 'zbxctl "+verb+"' instead")
+	}
 	acknowledgeCmd.Flags().StringVar(&ackSeverity, "severity", "", "also change the problem severity (0-5 or name)")
 }
 
@@ -362,6 +365,8 @@ var (
 	flagUpdateHostRemoveGroups    []string
 	flagUpdateHostAddTemplates    []string
 	flagUpdateHostRemoveTemplates []string
+	flagUpdateHostProxy           string
+	flagUpdateHostProxyGroup      string
 )
 
 var createCmd = &cobra.Command{Use: "create", Short: "Create resources"}
@@ -410,6 +415,8 @@ func init() {
 	g.StringArrayVar(&flagUpdateHostRemoveGroups, "remove-group", nil, "host group to remove (repeatable)")
 	g.StringArrayVar(&flagUpdateHostAddTemplates, "add-template", nil, "template to link (repeatable)")
 	g.StringArrayVar(&flagUpdateHostRemoveTemplates, "remove-template", nil, "template to unlink (repeatable)")
+	g.StringVar(&flagUpdateHostProxy, "proxy", "", "monitor the host through this proxy (name or ID), or none to monitor it from the server")
+	g.StringVar(&flagUpdateHostProxyGroup, "proxy-group", "", "monitor the host through this proxy group (name or ID)")
 	updateCmd.AddCommand(updateHostCmd)
 
 	deleteCmd.AddCommand(deleteHostCmd)
@@ -495,7 +502,8 @@ func runUpdateHost(_ *cobra.Command, args []string) error {
 
 	if flagUpdateHostVisibleName == "" && flagUpdateHostDescription == "" &&
 		len(flagUpdateHostAddGroups) == 0 && len(flagUpdateHostRemoveGroups) == 0 &&
-		len(flagUpdateHostAddTemplates) == 0 && len(flagUpdateHostRemoveTemplates) == 0 {
+		len(flagUpdateHostAddTemplates) == 0 && len(flagUpdateHostRemoveTemplates) == 0 &&
+		flagUpdateHostProxy == "" && flagUpdateHostProxyGroup == "" {
 		return cliPrintErr(outFmt, "no update flags provided; nothing to do", output.ExitError)
 	}
 
@@ -539,7 +547,28 @@ func runUpdateHost(_ *cobra.Command, args []string) error {
 		in.RemoveTemplateIDs = append(in.RemoveTemplateIDs, id)
 	}
 
-	if !confirm(fmt.Sprintf("update host %q?", args[0])) {
+	if flagUpdateHostProxy != "" && flagUpdateHostProxyGroup != "" {
+		return cliPrintErr(outFmt, "--proxy and --proxy-group are exclusive", output.ExitUsage)
+	}
+	what := ""
+	switch {
+	case flagUpdateHostProxy == "none":
+		in.MonitoredBy, what = "server", ", monitored by the server"
+	case flagUpdateHostProxy != "":
+		id, err := resources.ResolveProxyID(c, flagUpdateHostProxy)
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		in.MonitoredBy, in.ProxyID, what = "proxy", id, fmt.Sprintf(", monitored by proxy %q", flagUpdateHostProxy)
+	case flagUpdateHostProxyGroup != "":
+		id, err := resources.ResolveProxyGroupID(c, flagUpdateHostProxyGroup)
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		in.MonitoredBy, in.ProxyGroupID, what = "group", id, fmt.Sprintf(", monitored by proxy group %q", flagUpdateHostProxyGroup)
+	}
+
+	if !confirm(fmt.Sprintf("update host %q%s?", args[0], what)) {
 		return nil
 	}
 

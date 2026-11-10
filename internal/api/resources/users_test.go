@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
 	"github.com/mwtrigg/zbxctl/internal/config"
@@ -406,5 +407,173 @@ func TestGetLostAndRuleCounts(t *testing.T) {
 	lost, _ := GetLost(c, "item", nil, nil)
 	if len(lost) != 1 || lost[0].ID != "100" || lost[0].RuleID != "50" || lost[0].DeletesAt != "9" {
 		t.Fatalf("lost: %+v", lost)
+	}
+}
+
+func TestSetMacroCreatesThenUpdatesWithRightMethods(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"usermacro.get": `[]`, "usermacro.create": `{"hostmacroids":["1"]}`})
+	act, err := SetMacro(c, MacroInput{HostID: "10", Macro: "{$A}", Value: "v", Type: "0"})
+	if err != nil || act != "created" || (*calls)[1]["method"] != "usermacro.create" {
+		t.Fatalf("act=%q err=%v calls=%v", act, err, *calls)
+	}
+	if p := (*calls)[1]["params"].(map[string]any); p["hostid"] != "10" || p["macro"] != "{$A}" {
+		t.Fatalf("create params: %v", p)
+	}
+	c2, calls2 := newFake(t, map[string]string{"usermacro.get": `[{"hostmacroid":"5","hostid":"10","macro":"{$A}","value":"old","type":"0"}]`, "usermacro.update": `{"hostmacroids":["5"]}`})
+	act, err = SetMacro(c2, MacroInput{HostID: "10", Macro: "{$A}", Value: "new", Type: "0"})
+	p := (*calls2)[1]["params"].(map[string]any)
+	if err != nil || act != "updated" || p["hostmacroid"] != "5" || p["macro"] != nil {
+		t.Fatalf("act=%q err=%v params=%v", act, err, p)
+	}
+	c3, calls3 := newFake(t, map[string]string{"usermacro.get": `[]`, "usermacro.createglobal": `{"globalmacroids":["1"]}`})
+	if _, err := SetMacro(c3, MacroInput{Global: true, Macro: "{$G}", Value: "v", Type: "0"}); err != nil || (*calls3)[1]["method"] != "usermacro.createglobal" {
+		t.Fatalf("global create: %v %v", err, *calls3)
+	}
+}
+
+func TestUpdateHostProxyParams(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"host.get": `[{"hostid":"10","host":"h","name":"h","status":"0","hostgroups":[{"groupid":"1"}],"parentTemplates":[]}]`, "host.update": `{"hostids":["10"]}`})
+	for _, tc := range []struct {
+		in   UpdateHostInput
+		want map[string]float64
+	}{
+		{UpdateHostInput{HostID: "10", MonitoredBy: "server"}, map[string]float64{"monitored_by": 0}},
+		{UpdateHostInput{HostID: "10", MonitoredBy: "proxy", ProxyID: "3"}, map[string]float64{"monitored_by": 1}},
+		{UpdateHostInput{HostID: "10", MonitoredBy: "group", ProxyGroupID: "4"}, map[string]float64{"monitored_by": 2}},
+	} {
+		*calls = nil
+		if _, err := UpdateHost(c, tc.in); err != nil {
+			t.Fatal(err)
+		}
+		var p map[string]any
+		for _, call := range *calls {
+			if call["method"] == "host.update" {
+				p = call["params"].(map[string]any)
+			}
+		}
+		if p["monitored_by"].(float64) != tc.want["monitored_by"] {
+			t.Errorf("%+v -> %v", tc.in, p)
+		}
+		if tc.in.MonitoredBy == "proxy" && p["proxyid"] != "3" || tc.in.MonitoredBy == "group" && p["proxy_groupid"] != "4" {
+			t.Errorf("ids missing: %v", p)
+		}
+	}
+}
+
+func TestAuditLogParams(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"auditlog.get": `[{"auditid":"a","clock":"100","username":"u","ip":"1.2.3.4","action":"2","resourcetype":"4","resourceid":"9","resourcename":"web1","details":""}]`})
+	es, err := GetAuditLog(c, AuditQuery{Users: []string{"u"}, ActionCodes: []string{"2"}, ResourceCodes: []string{"4"}, From: 50, Search: "web", Limit: 10})
+	if err != nil || len(es) != 1 || es[0].ResourceName != "web1" {
+		t.Fatalf("es=%+v err=%v", es, err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	f := p["filter"].(map[string]any)
+	if f["username"] == nil || f["action"] == nil || f["resourcetype"] == nil || p["time_from"].(float64) != 50 || p["limit"].(float64) != 10 {
+		t.Fatalf("bad params: %v", p)
+	}
+	if p["sortfield"] != "clock" || p["sortorder"] != "DESC" {
+		t.Fatalf("must be newest first: %v", p)
+	}
+}
+
+func hourlyTrend(item string, t time.Time, num, min, avg, max string) TrendRecord {
+	return TrendRecord{ItemID: item, Host: "h", Key: "k", ClockUnix: t.Unix(), Clock: strconv.FormatInt(t.Unix(), 10), Num: num, Min: min, Avg: avg, Max: max}
+}
+
+func TestRollupTrendsDayWeightedAndDST(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("tz database not available")
+	}
+	// 2026-03-08 is the spring-forward day in New York: it has 23 hours.
+	day := time.Date(2026, 3, 8, 0, 0, 0, 0, ny)
+	var recs []TrendRecord
+	for h := 0; h < 23; h++ {
+		recs = append(recs, hourlyTrend("1", day.Add(time.Duration(h)*time.Hour), "60", "10", "20", "30"))
+	}
+	recs = append(recs, hourlyTrend("1", day.Add(5*time.Hour), "60", "2", "20", "99")) // an extra bucket with the day's extremes
+	next := time.Date(2026, 3, 9, 0, 0, 0, 0, ny)
+	recs = append(recs, hourlyTrend("1", next, "30", "1", "50", "60"))
+	got, err := RollupTrends(recs, "day", ny)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("got %+v err=%v", got, err)
+	}
+	d := got[0]
+	if d.ClockUnix != day.Unix() || d.Min != "2" || d.Max != "99" || d.Num != "1440" {
+		t.Fatalf("23-hour day (24 buckets here): %+v", d)
+	}
+	if got[1].ClockUnix != next.Unix() || got[1].Avg != "50" || got[1].Min != "1" {
+		t.Fatalf("next day: %+v", got[1])
+	}
+	// weighted average: 60 samples at 10 and 30 samples at 40 -> (600+1200)/90 = 20
+	w, _ := RollupTrends([]TrendRecord{hourlyTrend("1", day, "60", "0", "10", "20"), hourlyTrend("1", day.Add(time.Hour), "30", "0", "40", "80")}, "day", ny)
+	if w[0].Avg != "20" {
+		t.Fatalf("avg must be weighted by sample count: %+v", w[0])
+	}
+	// weeks start on Monday
+	mon := time.Date(2026, 3, 9, 0, 0, 0, 0, ny)
+	wk, _ := RollupTrends([]TrendRecord{hourlyTrend("1", day, "60", "1", "1", "1"), hourlyTrend("1", mon.Add(3*24*time.Hour), "60", "1", "1", "1")}, "week", ny)
+	if len(wk) != 2 || wk[1].ClockUnix != mon.Unix() {
+		t.Fatalf("week buckets: %+v", wk)
+	}
+	if _, err := RollupTrends(recs, "year", ny); err == nil {
+		t.Fatal("unknown period must be refused")
+	}
+}
+
+func TestMappingAndExpressionParsing(t *testing.T) {
+	m, err := ParseMapping("equals", "0=Down")
+	if err != nil || m.Type != "0" || m.Value != "0" || m.NewValue != "Down" || m.Label() != "0=Down" {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if m, _ := ParseMapping("ge", "5=High"); m.Type != "1" || m.Label() != ">=5=High" {
+		t.Fatalf("ge: %+v", m)
+	}
+	if m, _ := ParseMapping("range", "1-5=Low"); m.Type != "3" || m.Value != "1-5" {
+		t.Fatalf("range: %+v", m)
+	}
+	if m, _ := ParseMapping("regexp", "^ab=x=y"); m.Value != "^ab=x" || m.NewValue != "y" { // the last = splits
+		t.Fatalf("regexp keeps earlier '=': %+v", m)
+	}
+	if m, _ := ParseMapping("default", "Unknown"); m.Type != "5" || m.NewValue != "Unknown" {
+		t.Fatalf("default: %+v", m)
+	}
+	for _, bad := range []string{"", "novalue", "=Text", "key="} {
+		if _, err := ParseMapping("equals", bad); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+	e, err := ParseExpression("matches:^(ext4|xfs)$", true)
+	if err != nil || e.Type != "3" || e.Expression != "^(ext4|xfs)$" || e.CaseSensitive != "1" {
+		t.Fatalf("%+v %v", e, err)
+	}
+	if e, _ := ParseExpression("any:a,b", false); e.Type != "1" || e.Delimiter != "," || e.CaseSensitive != "0" {
+		t.Fatalf("any: %+v", e)
+	}
+	for _, bad := range []string{"", "nocolon", "bogus:x"} {
+		if _, err := ParseExpression(bad, false); err == nil {
+			t.Errorf("%q must be refused", bad)
+		}
+	}
+}
+
+func TestValueMapCreateAndOwnerNames(t *testing.T) {
+	c, calls := newFake(t, map[string]string{
+		"valuemap.create": `{"valuemapids":["9"]}`,
+		"valuemap.get":    `[{"valuemapid":"9","hostid":"7","name":"S","mappings":[{"type":"0","value":"1","newvalue":"Up"}]}]`,
+		"template.get":    `[{"templateid":"7","host":"tpl"}]`,
+		"host.get":        `[]`,
+	})
+	id, err := CreateValueMap(c, "7", "S", []Mapping{{Type: "0", Value: "1", NewValue: "Up"}})
+	if err != nil || id != "9" {
+		t.Fatalf("%q %v", id, err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	if p["hostid"] != "7" || len(p["mappings"].([]any)) != 1 {
+		t.Fatalf("create params: %v", p)
+	}
+	vms, err := GetValueMaps(c, ValueMapFilter{})
+	if err != nil || len(vms) != 1 || vms[0].Owner != "tpl" {
+		t.Fatalf("owner name must come from the template: %+v %v", vms, err)
 	}
 }

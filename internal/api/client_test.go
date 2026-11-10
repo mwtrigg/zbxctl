@@ -58,3 +58,31 @@ func TestEndpointAcceptsBaseOrFullURL(t *testing.T) {
 		}
 	}
 }
+
+func TestParseVersionAndChecks(t *testing.T) {
+	for in, want := range map[string][3]int{"7.4": {7, 4, 0}, "7.4.16": {7, 4, 16}, "8.0.0alpha1": {8, 0, 0}, "7.0.5rc2": {7, 0, 5}} {
+		v, err := ParseVersion(in)
+		if err != nil || [3]int{v.Major, v.Minor, v.Patch} != want {
+			t.Errorf("%s: %+v %v", in, v, err)
+		}
+	}
+	if _, err := ParseVersion("banana"); err == nil {
+		t.Error("garbage must not parse")
+	}
+	cases := []struct {
+		v     string
+		newer bool
+		err   bool
+	}{{"7.4.16", false, false}, {"7.4", false, false}, {"7.6.0", true, false}, {"8.0.1", true, false}, {"7.0.9", false, true}, {"6.4.1", false, true}}
+	for _, c := range cases {
+		v, _ := ParseVersion(c.v)
+		newer, err := v.Check()
+		if newer != c.newer || (err != nil) != c.err {
+			t.Errorf("%s: newer=%v err=%v", c.v, newer, err)
+		}
+	}
+	v, _ := ParseVersion("8.0")
+	if !v.AtLeast(7, 4) || !v.AtLeast(8, 0) || v.AtLeast(8, 1) {
+		t.Error("AtLeast")
+	}
+}
