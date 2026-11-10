@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"fmt"
 	"github.com/spf13/cobra"
+	"sort"
+	"strings"
 
 	"github.com/mwtrigg/zbxctl/internal/api/resources"
 	"github.com/mwtrigg/zbxctl/internal/output"
@@ -134,3 +137,103 @@ var getProxyGroupsCmd = &cobra.Command{
 }
 
 func init() { getCmd.AddCommand(getProxiesCmd, getProxyGroupsCmd) }
+
+var (
+	alUsers   []string
+	alActions []string
+	alRes     []string
+	alSince   string
+	alUntil   string
+	alSearch  string
+	alLimit   int
+	alDetails bool
+)
+
+func codesFor(names []string, table map[string]string, what string) ([]string, error) {
+	var out []string
+	for _, n := range names {
+		found := false
+		for code, label := range table {
+			if label == n || code == n {
+				out = append(out, code)
+				found = true
+			}
+		}
+		if !found {
+			var ks []string
+			for _, l := range table {
+				ks = append(ks, l)
+			}
+			sort.Strings(ks)
+			return nil, &usageError{fmt.Sprintf("unknown %s %q: use %s, or a numeric code", what, n, strings.Join(ks, ", "))}
+		}
+	}
+	return out, nil
+}
+
+var getAuditLogCmd = &cobra.Command{
+	Use:   "auditlog",
+	Short: "Who changed what, when: the Zabbix audit log, newest first",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c, outFmt, ctx, err := newClient()
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		q := resources.AuditQuery{Users: alUsers, Search: alSearch, Limit: effectiveLimit(alLimit, ctx)}
+		if q.ActionCodes, err = codesFor(alActions, resources.AuditActions, "action"); err != nil {
+			return cliFail(outFmt, err)
+		}
+		if q.ResourceCodes, err = codesFor(alRes, resources.AuditResources, "resource"); err != nil {
+			return cliFail(outFmt, err)
+		}
+		if alSince != "" {
+			if q.From, err = parseTimestamp(alSince); err != nil {
+				return cliFail(outFmt, err)
+			}
+		}
+		if alUntil != "" {
+			if q.Till, err = parseTimestamp(alUntil); err != nil {
+				return cliFail(outFmt, err)
+			}
+		}
+		es, err := resources.GetAuditLog(c, q)
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		cols := []output.Column{{Key: "time", Header: "TIME"}, {Key: "user", Header: "USER"}, {Key: "action", Header: "ACTION"}, {Key: "resource", Header: "RESOURCE"}, {Key: "name", Header: "NAME"}, {Key: "ip", Header: "IP"}}
+		rows := make([]map[string]any, len(es))
+		for i, e := range es {
+			act, ok := resources.AuditActions[e.Action]
+			if !ok {
+				act = "action " + e.Action
+			}
+			res, ok := resources.AuditResources[e.ResourceType]
+			if !ok {
+				res = "resource " + e.ResourceType
+			}
+			row := map[string]any{"time": fmtUnix(e.Clock), "user": e.User, "ip": e.IP, "action": act, "resource": res, "name": e.ResourceName, "resourceid": e.ResourceID}
+			if alDetails {
+				row["details"] = e.Details
+			}
+			rows[i] = row
+		}
+		if alDetails {
+			cols = append(cols, output.Column{Key: "details", Header: "DETAILS"})
+		}
+		return output.Print(outFmt, cols, rows)
+	},
+}
+
+func init() {
+	f := getAuditLogCmd.Flags()
+	f.StringArrayVar(&alUsers, "user", nil, "only this username (repeatable)")
+	f.StringArrayVar(&alActions, "action", nil, "add|update|delete|login|logout|execute|push, or a numeric code (repeatable)")
+	f.StringArrayVar(&alRes, "resource", nil, "user|usergroup|host|hostgroup|template|item|trigger|macro|maintenance, or a numeric code (repeatable)")
+	f.StringVar(&alSince, "since", "", "unix, RFC3339, YYYY-MM-DD, or 24h/7d")
+	f.StringVar(&alUntil, "until", "", "end of the window")
+	f.StringVar(&alSearch, "search", "", "substring of the resource name")
+	f.IntVar(&alLimit, "limit", 0, "max results")
+	f.BoolVar(&alDetails, "details", false, "include what changed (Zabbix's change details, secrets are already masked by Zabbix)")
+	getCmd.AddCommand(getAuditLogCmd)
+}
