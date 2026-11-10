@@ -313,3 +313,23 @@ func TestDiagnoseTriggerReasons(t *testing.T) {
 		}
 	}
 }
+
+func TestSetMaintenanceEndMovesActiveTillAndPeriodTogether(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"maintenance.update": `{"maintenanceids":["3"]}`})
+	m := &Maintenance{MaintenanceID: "3", Name: "w", TimePeriods: []TimePeriod{{Type: "0", StartDate: "1000", Period: "600"}}}
+	if err := SetMaintenanceEnd(c, m, 2500); err != nil {
+		t.Fatal(err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	tp := p["timeperiods"].([]any)[0].(map[string]any)
+	if p["active_till"].(float64) != 2500 || tp["period"].(float64) != 1500 || tp["start_date"].(float64) != 1000 {
+		t.Fatalf("bad update: %v", p)
+	}
+	rec := &Maintenance{Name: "r", TimePeriods: []TimePeriod{{Type: "2"}}}
+	if err := SetMaintenanceEnd(c, rec, 9999); err == nil {
+		t.Fatal("recurring windows must be refused")
+	}
+	if err := SetMaintenanceEnd(c, m, 900); err == nil {
+		t.Fatal("end before start must be refused")
+	}
+}

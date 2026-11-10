@@ -295,6 +295,9 @@ func runMaintenanceList(cmd *cobra.Command, args []string) error {
 		{Key: "name", Header: "NAME"},
 		{Key: "active_since", Header: "START"},
 		{Key: "active_till", Header: "END"},
+		{Key: "state", Header: "STATE"},
+		{Key: "hosts", Header: "HOSTS"},
+		{Key: "groups", Header: "GROUPS"},
 	}
 	rows := make([]map[string]any, len(maintenances))
 	for i, m := range maintenances {
@@ -307,6 +310,9 @@ func runMaintenanceList(cmd *cobra.Command, args []string) error {
 			"active_till_unix":  m.ActiveTill,
 			"description":       m.Description,
 			"maintenance_type":  m.MaintenanceType,
+			"state":             maintenanceState(m),
+			"hosts":             m.HostNames(),
+			"groups":            m.GroupNames(),
 		}
 	}
 	return output.Print(outFmt, cols, rows)
@@ -769,4 +775,66 @@ func runAcknowledge(cmd *cobra.Command, args []string) error {
 		p.Severity = sev
 	}
 	return runBulk(cmd, args, ackSpec(p, verb))
+}
+
+// maintenanceState is upcoming, active or expired relative to now.
+func maintenanceState(m resources.Maintenance) string {
+	since, _ := strconv.ParseInt(m.ActiveSince, 10, 64)
+	till, _ := strconv.ParseInt(m.ActiveTill, 10, 64)
+	now := time.Now().Unix()
+	switch {
+	case now < since:
+		return "upcoming"
+	case now > till:
+		return "expired"
+	}
+	return "active"
+}
+
+var (
+	maintBy    string
+	maintUntil string
+)
+
+func newMaintenanceEndCmd(verb string) *cobra.Command {
+	c := &cobra.Command{
+		Use:   verb + " <id|name>...",
+		Short: strings.ToUpper(verb[:1]) + verb[1:] + " a one-time maintenance window (moves its end; recurring windows are refused)",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			outFmt := output.Format(flagOutput)
+			if (maintBy == "") == (maintUntil == "") {
+				return cliPrintErr(outFmt, "give exactly one of --by and --until", output.ExitUsage)
+			}
+			if verb == "shorten" && maintUntil != "" {
+				return cliPrintErr(outFmt, "--until is only for extend; shorten takes --by", output.ExitUsage)
+			}
+			var by time.Duration
+			var until int64
+			if maintBy != "" {
+				d, err := parseWindow(maintBy)
+				if err != nil || d <= 0 {
+					return cliPrintErr(outFmt, fmt.Sprintf("invalid --by %q: use a duration like 30m, 2h, 1d", maintBy), output.ExitUsage)
+				}
+				by = d
+			} else {
+				ts, err := parseTimestamp(maintUntil)
+				if err != nil {
+					return cliFail(outFmt, err)
+				}
+				until = ts
+			}
+			return runBulk(cmd, args, maintenanceEndSpec(verb, by, until))
+		},
+	}
+	c.Flags().StringVar(&maintBy, "by", "", "how much to move the end, e.g. 30m, 2h, 1d")
+	if verb == "extend" {
+		c.Flags().StringVar(&maintUntil, "until", "", "set the new end: unix, RFC3339 or YYYY-MM-DD")
+	}
+	addBulkFlags(c)
+	return c
+}
+
+func init() {
+	maintenanceCmd.AddCommand(newMaintenanceEndCmd("extend"), newMaintenanceEndCmd("shorten"))
 }
