@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -255,5 +256,195 @@ func TestPasswordSessionsAreLoggedOutAndUseSessionID(t *testing.T) {
 	}
 	if len(f.called("user.logout")) != 1 {
 		t.Fatalf("the session must be logged out: %v", f.Calls)
+	}
+}
+
+// --- round 3: the sabotage misses ---
+
+// R8: the target is marked 'sent' BEFORE its request goes out, so a run killed mid-request
+// does not read "not yet attempted".
+func TestTheTargetIsMarkedSentBeforeTheRequestGoesOut(t *testing.T) {
+	sawSent := false
+	f := &fakeZabbix{}
+	f.Handler = func(c rpcCall) fakeReply {
+		if c.Method == "host.update" {
+			for _, p := range xdgStateFiles(t) {
+				if strings.Contains(readFileString(p), `"status": "sent"`) {
+					sawSent = true
+				}
+			}
+			return fakeReply{Result: `{"hostids":["10"]}`}
+		}
+		return hostGetter(c)
+	}
+	if _, err := runFake(t, f, "disable", "host", "web1", "--apply", "--no-verify"); err != nil {
+		t.Fatal(err)
+	}
+	if !sawSent {
+		t.Fatal("when the request arrived the record did not yet say 'sent'")
+	}
+	// a single-object write too
+	sawSent = false
+	g := &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "hostgroup.get":
+			return fakeReply{Result: "[]"}
+		case "hostgroup.create":
+			for _, p := range xdgStateFiles(t) {
+				if strings.Contains(readFileString(p), `"status": "sent"`) {
+					sawSent = true
+				}
+			}
+			return fakeReply{Result: `{"groupids":["5"]}`}
+		}
+		return fakeReply{}
+	}}
+	if _, err := runFake(t, g, "create", "group", "--name", "G", "--apply"); err != nil || !sawSent {
+		t.Fatalf("a single-object write must be marked sent first too: %v", err)
+	}
+}
+
+// R12: enable/disable re-read the host by ID, so a host named like that ID cannot break it.
+func TestDisableIsVerifiedByIDEvenIfAnotherHostIsNamedLikeIt(t *testing.T) {
+	disabled := false
+	one := func(id, host, status string) string {
+		return `{"hostid":"` + id + `","host":"` + host + `","name":"` + host + `","status":"` + status + `","hostgroups":[],"parentTemplates":[],"interfaces":[],"tags":[],"macros":[]}`
+	}
+	f := &fakeZabbix{}
+	f.Handler = func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "host.update":
+			disabled = true
+			return fakeReply{Result: `{"hostids":["10084"]}`}
+		case "host.get":
+			st := "0"
+			if disabled {
+				st = "1"
+			}
+			if ids, ok := c.Params["hostids"].([]any); ok && len(ids) == 1 && ids[0] == "10084" {
+				return fakeReply{Result: "[" + one("10084", "web-01", st) + "]"}
+			}
+			if flt, ok := c.Params["filter"].(map[string]any); ok {
+				for _, v := range flt {
+					if l, _ := v.([]any); len(l) == 1 && l[0] == "web-01" {
+						return fakeReply{Result: "[" + one("10084", "web-01", st) + "]"}
+					}
+					if l, _ := v.([]any); len(l) == 1 && l[0] == "10084" {
+						return fakeReply{Result: "[" + one("10090", "10084", "0") + "]"} // another host is NAMED 10084
+					}
+				}
+			}
+			return fakeReply{Result: "[]"}
+		}
+		return fakeReply{}
+	}
+	out, err := runFake(t, f, "disable", "host", "web-01", "--apply")
+	if err != nil || !strings.Contains(out, `"verified": true`) {
+		t.Fatalf("the re-read must go by ID: %v\n%s", err, out)
+	}
+}
+
+// R14: Execute (what main runs) logs out of password sessions.
+func TestExecuteLogsOutOfPasswordSessions(t *testing.T) {
+	f := &fakeZabbix{PasswordLogin: true, UseExecute: true, Handler: func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "user.login":
+			return fakeReply{Result: `"sess9"`}
+		case "host.get":
+			return fakeReply{Result: "[]"}
+		}
+		return fakeReply{}
+	}}
+	if _, err := runFake(t, f, "get", "hosts"); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.called("user.logout")) != 1 {
+		t.Fatalf("Execute must log the session out: %v", f.Calls)
+	}
+}
+
+// R19: the state file's time has sub-second resolution.
+func TestStateTimeHasSubSecondResolution(t *testing.T) {
+	g := &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "hostgroup.get":
+			return fakeReply{Result: "[]"}
+		case "hostgroup.create":
+			return fakeReply{Result: `{"groupids":["5"]}`}
+		}
+		return fakeReply{}
+	}}
+	if _, err := runFake(t, g, "create", "group", "--name", "G", "--apply"); err != nil {
+		t.Fatal(err)
+	}
+	files := xdgStateFiles(t)
+	if len(files) != 1 {
+		t.Fatal(files)
+	}
+	var doc struct {
+		Time string `json:"time"`
+	}
+	_ = json.Unmarshal([]byte(readFileString(files[0])), &doc)
+	if !regexp.MustCompile(`T\d\d:\d\d:\d\d\.\d+Z$`).MatchString(doc.Time) {
+		t.Fatalf("the time needs fractional seconds so ties can be ordered: %q", doc.Time)
+	}
+}
+
+// R22: one visible name for several hosts is refused before anything changes.
+func TestVisibleNameNeedsExactlyOneTarget(t *testing.T) {
+	f := &fakeZabbix{Handler: hostWithTemplates}
+	_, err := runFake(t, f, "update", "host", "web1", "web2", "--visible-name", "X", "--apply")
+	if exitOf(err) != 5 || len(f.called("host.update")) != 0 {
+		t.Fatalf("--visible-name with two targets must be refused (exit 5): %v", err)
+	}
+}
+
+// R25: after a 504 the re-read checks the monitoring source as well.
+func TestUpdateHostAfterA504ChecksTheProxy(t *testing.T) {
+	run := func(applied bool) error {
+		by := "1" // monitored through proxy 4
+		f := &fakeZabbix{}
+		f.Handler = func(c rpcCall) fakeReply {
+			switch c.Method {
+			case "host.update":
+				if applied {
+					by = "0"
+				}
+				return fakeReply{Status: 504}
+			case "host.get":
+				return fakeReply{Result: hostJSON("Web", "d", by, "4")}
+			}
+			return fakeReply{}
+		}
+		_, err := runFake(t, f, "update", "host", "web1", "--proxy", "none", "--apply", "--retries", "0")
+		return err
+	}
+	if exitOf(run(false)) != 7 {
+		t.Fatal("a 504 that never moved the host off its proxy must be exit 7")
+	}
+	if err := run(true); err != nil {
+		t.Fatalf("a re-read that shows the host monitored from the server confirms it: %v", err)
+	}
+}
+
+// R28: when Zabbix refuses the first file of an import, nothing changed and the record goes.
+func TestARefusedFirstImportFileRemovesTheRecord(t *testing.T) {
+	file := t.TempDir() + "/t.yaml"
+	_ = writeTestFile(file, "zabbix_export:\n  version: '7.4'\n  templates: []\n")
+	f := &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "configuration.importcompare":
+			return fakeReply{Result: `{"templates":{"updated":{"templates":{"T":{}}}}}`}
+		case "configuration.import":
+			return fakeReply{RPCError: "invalid template"}
+		}
+		return fakeReply{}
+	}}
+	_, err := runFake(t, f, "import", "template", file, "--apply")
+	if err == nil {
+		t.Fatal("the import is refused")
+	}
+	if got := xdgStateFiles(t); len(got) != 0 {
+		t.Fatalf("Zabbix refused the first file, so there is nothing to undo: %v", got)
 	}
 }

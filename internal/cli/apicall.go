@@ -53,16 +53,27 @@ func isReadMethod(m string) bool {
 var apiMethodRe = regexp.MustCompile(`^[a-z]+\.[a-zA-Z]+$|^apiinfo\.version$`)
 var secretKeyRe = regexp.MustCompile(`(?i)pass|secret|token|auth|api_?key|private|psk|community`)
 
-// maskSecrets hides values of keys that look like secrets, for the dry run and
-// the audit file.
+// maskSecrets hides secrets, for the dry run, the audit file and read results. It masks the
+// value of any key whose name looks secret, the "value" of an object whose "type" says it
+// is a secret macro (type 1), and the "value" of a {name, value} pair whose name looks
+// secret (media type parameters, HTTP headers and variables, ...).
 func maskSecrets(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(t))
+		secretValue := false
+		if ty, ok := t["type"]; ok && fmt.Sprint(ty) == "1" {
+			_, hasMacro := t["macro"]
+			secretValue = hasMacro // a user macro of type "secret text"
+		}
+		if n, ok := t["name"].(string); ok && secretKeyRe.MatchString(n) {
+			secretValue = true // a {name, value} pair named like a secret
+		}
 		for k, x := range t {
-			if secretKeyRe.MatchString(k) {
+			switch {
+			case secretKeyRe.MatchString(k), k == "value" && secretValue:
 				out[k] = "******"
-			} else {
+			default:
 				out[k] = maskSecrets(x)
 			}
 		}
@@ -75,6 +86,19 @@ func maskSecrets(v any) any {
 		return out
 	}
 	return v
+}
+
+var secretLineRe = regexp.MustCompile(`(?i)^(\s*"?[A-Za-z_.-]*(?:pass|secret|token|psk|community|api_?key|private|auth_?key)[A-Za-z_.-]*"?\s*[:=]\s*)\S.*$`)
+
+// maskExportLines hides the value on every line of an export whose key looks secret.
+func maskExportLines(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, l := range lines {
+		if m := secretLineRe.FindStringSubmatch(l); m != nil {
+			lines[i] = m[1] + "******"
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 var apiCmd = &cobra.Command{Use: "api", Short: "Escape hatch for API methods zbxctl has no command for"}
@@ -189,6 +213,9 @@ user.checkAuthentication, token.generate and script.execute are refused.`,
 			_ = json.Unmarshal(raw, &result)
 			if !flagShowSecrets {
 				result = maskSecrets(result) // item passwords, PSKs, communities: --show-secrets to see them
+				if str, ok := result.(string); ok {
+					result = maskExportLines(str) // configuration.export returns one YAML/JSON/XML string
+				}
 			}
 		}
 		doc := map[string]any{"data": result, "meta": map[string]any{"method": method, "command": "api call"}}

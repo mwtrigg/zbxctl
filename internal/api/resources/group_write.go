@@ -16,12 +16,11 @@ type GroupInfo struct {
 
 // GetGroupInfo resolves a host group by ID or exact name.
 func GetGroupInfo(c *api.Client, idOrName string) (*GroupInfo, error) {
-	params := map[string]any{"output": []string{"groupid", "name"}, "selectHosts": "count"}
-	if isNumeric(idOrName) {
-		params["groupids"] = []string{idOrName}
-	} else {
-		params["filter"] = map[string]any{"name": []string{idOrName}}
+	g, err := ResolveGroup(c, idOrName)
+	if err != nil {
+		return nil, err
 	}
+	params := map[string]any{"output": []string{"groupid", "name"}, "selectHosts": "count", "groupids": []string{g.GroupID}}
 	raw, err := c.Call("hostgroup.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("hostgroup.get: %w", err)

@@ -55,7 +55,9 @@ func beginWrite(cmd *cobra.Command, ctx *config.Context, name, target, desc stri
 	}
 	w.rec = r
 	fmt.Fprintf(os.Stderr, "before-state saved: %s\n", r.path)
-	w.note(stateSent, nil) // the caller makes the request next
+	if err := r.mark(0, stateSent, nil); err != nil { // the caller makes the request next
+		return nil, false, fmt.Errorf("the before-state file %s cannot be updated (%v): nothing was sent", r.path, err)
+	}
 	return w, true, nil
 }
 

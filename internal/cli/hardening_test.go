@@ -630,3 +630,76 @@ func TestCreateItemRefusesSystemRunKeysUnlessTheContextAllowsIt(t *testing.T) {
 		t.Fatalf("an ordinary key is fine: %v", err)
 	}
 }
+
+// R3-6 (correctness): secret macro values and secret name/value pairs never reach the audit
+// record, the dry run or read output.
+func TestAPICallMasksSecretMacroValuesAndNameValuePairs(t *testing.T) {
+	f := &fakeZabbix{}
+	out, err := runFake(t, f, "api", "call", "usermacro.update", "--params", `{"hostmacroid":"77","macro":"{$P}","value":"MacroS3cret!","type":"1"}`, "--apply")
+	if err != nil || strings.Contains(out, "MacroS3cret!") {
+		t.Fatalf("a secret macro value must not be printed: %v\n%s", err, out)
+	}
+	for _, p := range xdgStateFiles(t) {
+		if strings.Contains(readFileString(p), "MacroS3cret!") {
+			t.Fatalf("a secret macro value must not be saved in %s", p)
+		}
+	}
+	// the dry run too, and a plain (type 0) macro stays readable
+	f = &fakeZabbix{}
+	out, _ = runFake(t, f, "api", "call", "usermacro.update", "--params", `{"hostmacroid":"77","macro":"{$P}","value":"visible","type":"0"}`)
+	if !strings.Contains(out, "visible") {
+		t.Fatalf("a text macro is not a secret: %s", out)
+	}
+	out, _ = runFake(t, f, "api", "call", "usermacro.update", "--params", `{"hostmacroid":"77","macro":"{$P}","value":"hunter2","type":1}`)
+	if strings.Contains(out, "hunter2") {
+		t.Fatalf("type may be a number: %s", out)
+	}
+	// name/value pairs: a media type parameter named like a secret, HTTP headers
+	f = &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		return fakeReply{Result: `[{"parameters":[{"name":"bot_token","value":"xoxb-SECRET"},{"name":"channel","value":"ops"}]}]`}
+	}}
+	out, _ = runFake(t, f, "api", "call", "mediatype.get")
+	if strings.Contains(out, "xoxb-SECRET") || !strings.Contains(out, "ops") {
+		t.Fatalf("mask the secret pair, keep the other: %s", out)
+	}
+	// configuration.export returns one string
+	f = &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		return fakeReply{Result: `"zabbix_export:\n  hosts:\n    - host: a\n      password: itempass\n      description: ok\n"`}
+	}}
+	out, _ = runFake(t, f, "api", "call", "configuration.export", "--params", `{"options":{}}`)
+	if strings.Contains(out, "itempass") || !strings.Contains(out, "description: ok") {
+		t.Fatalf("an export's secret lines must be masked: %s", out)
+	}
+}
+
+// R3-3 (correctness): a run that can no longer update its record stops, rather than applying
+// the rest of the targets while the file says 'pending'.
+func TestRunStopsWhenTheStateFileCanNoLongerBeUpdated(t *testing.T) {
+	f := &fakeZabbix{}
+	f.Handler = func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "host.get":
+			if ids, ok := c.Params["hostids"].([]any); ok && len(ids) == 1 {
+				id := ids[0].(string)
+				return fakeReply{Result: `[{"hostid":"` + id + `","host":"w` + id + `","name":"W","status":"0","hostgroups":[],"parentTemplates":[],"interfaces":[],"tags":[],"macros":[]}]`}
+			}
+			return fakeReply{Result: "[]"}
+		case "host.update":
+			// the first request arrives: make the state directory unwritable for what follows
+			for _, p := range xdgStateFiles(t) {
+				_ = os.Remove(p)
+			}
+			_ = os.RemoveAll(os.Getenv("XDG_STATE_HOME") + "/zbxctl")
+			_ = os.WriteFile(os.Getenv("XDG_STATE_HOME")+"/zbxctl", []byte("x"), 0o600) // a file where the directory was
+			return fakeReply{Result: `{"hostids":["1"]}`}
+		}
+		return fakeReply{}
+	}
+	_, err := runFake(t, f, "disable", "host", "1", "2", "3", "--apply", "--no-verify")
+	if err == nil {
+		t.Fatal("a run whose record cannot be kept must fail")
+	}
+	if n := len(f.called("host.update")); n != 1 {
+		t.Fatalf("it must stop after the first target, not apply all three (applied %d)", n)
+	}
+}

@@ -84,8 +84,10 @@ func enforceMCPPolicy(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	var bad []string
-	cmd.Flags().Visit(func(f *pflag.Flag) {
-		if mcpChildDenied(f.Name) {
+	// VisitAll and Changed, not Visit: Visit walks the set of flags parsed so far, which a
+	// reused command tree (the tests) can leave populated.
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if f.Changed && mcpChildDenied(f.Name) {
 			bad = append(bad, "--"+f.Name)
 		}
 	})

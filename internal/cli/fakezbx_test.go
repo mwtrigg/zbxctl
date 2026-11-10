@@ -42,6 +42,9 @@ type fakeZabbix struct {
 	PasswordLogin bool
 	// After runs once the command has finished, while the server is still up.
 	After func()
+	// UseExecute runs the command through Execute (what main calls), so that what Execute
+	// does on the way out, like logging out of sessions, is exercised.
+	UseExecute bool
 }
 
 func (f *fakeZabbix) called(method string) []rpcCall {
@@ -127,7 +130,14 @@ func runFake(t *testing.T, f *fakeZabbix, args ...string) (string, error) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 	rootCmd.SetArgs(args)
-	err := rootCmd.Execute()
+	var err error
+	if f.UseExecute {
+		if code := Execute(); code != 0 {
+			err = &cliErr{code: code}
+		}
+	} else {
+		err = rootCmd.Execute()
+	}
 	if f.After != nil {
 		f.After()
 	}

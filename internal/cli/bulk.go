@@ -365,21 +365,25 @@ func runSteps(outFmt output.Format, name string, specCols []output.Column, steps
 			}
 		}()
 	}
-	note := func(i int, status string, err error) {
+	// note records an outcome in the before-state file. A failure is returned: the record is
+	// what says what happened, so a run that cannot keep it up to date must stop.
+	note := func(i int, status string, err error) error {
 		if rec == nil {
-			return
+			return nil
 		}
-		if serr := rec.mark(i, status, err); serr != nil {
-			fmt.Fprintf(os.Stderr, "warning: cannot update the before-state file %s: %v\n", rec.path, serr)
-		}
+		return rec.mark(i, status, err)
 	}
+	var stateErr error
 
 	var rows []map[string]any
 	var applyErr error
 	applied := steps[:0:0]
 	unknown := false
 	for i, s := range steps {
-		note(i, stateSent, nil) // so a run killed mid-request does not look "not yet attempted"
+		if serr := note(i, stateSent, nil); serr != nil { // so a run killed mid-request does not look "not yet attempted"
+			stateErr = serr
+			break // nothing was sent for this target
+		}
 		err := s.Apply()
 		if err != nil && !definitive(err) && s.Proves && s.Verify != nil {
 			// The request may have been executed. Look before deciding.
@@ -391,17 +395,23 @@ func runSteps(outFmt output.Format, name string, specCols []output.Column, steps
 		}
 		if err != nil {
 			if definitive(err) {
-				note(i, stateFailed, err)
+				_ = note(i, stateFailed, err)
 				applyErr = fmt.Errorf("%s: %w (%d of %d applied)", s.Key, err, len(applied), len(steps))
 			} else {
-				note(i, stateUnknown, err)
+				_ = note(i, stateUnknown, err)
 				unknown = true
 				applyErr = &outcomeUnknownError{fmt.Sprintf("%s: %v. The request may or may not have been executed; check the target before retrying (%d of %d confirmed). The before-state file is kept: %s", s.Key, err, len(applied), len(steps), statePathOrNone(rec))}
 			}
 			break
 		}
-		note(i, stateApplied, nil)
 		applied = append(applied, s)
+		if serr := note(i, stateApplied, nil); serr != nil {
+			stateErr = serr
+			break // this target is applied, but the record cannot say so: do not go on
+		}
+	}
+	if stateErr != nil && applyErr == nil {
+		applyErr = fmt.Errorf("the before-state file %s can no longer be updated (%v): stopped after %d of %d targets, the rest were NOT applied", statePathOrNone(rec), stateErr, len(applied), len(steps))
 	}
 
 	if applyErr != nil && !unknown && len(applied) == 0 && rec != nil {

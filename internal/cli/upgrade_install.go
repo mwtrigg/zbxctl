@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/mwtrigg/zbxctl/internal/sshsig"
@@ -282,7 +283,44 @@ func olderRelease(current, latest string) bool {
 	case lp == "": // latest is the release, current a pre-release of it
 		return false
 	}
-	return lp < cp
+	return comparePrerelease(lp, cp) < 0
+}
+
+// comparePrerelease orders two pre-release strings as semver does: dot-separated
+// identifiers compared one by one, numbers numerically (rc.2 < rc.10), numbers below
+// words, and a shorter list below a longer one that starts the same.
+func comparePrerelease(a, b string) int {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		x, y := as[i], bs[i]
+		xn, xerr := strconv.Atoi(x)
+		yn, yerr := strconv.Atoi(y)
+		switch {
+		case xerr == nil && yerr == nil:
+			if xn != yn {
+				if xn < yn {
+					return -1
+				}
+				return 1
+			}
+		case xerr == nil: // a number is below a word
+			return -1
+		case yerr == nil:
+			return 1
+		case x != y:
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	switch {
+	case len(as) < len(bs):
+		return -1
+	case len(as) > len(bs):
+		return 1
+	}
+	return 0
 }
 
 // prerelease returns the part after the first "-" of a version ("rc.1"), or "".

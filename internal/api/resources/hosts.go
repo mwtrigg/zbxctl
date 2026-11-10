@@ -270,16 +270,59 @@ func isNumeric(s string) bool {
 	return true
 }
 
-// ResolveGroupID returns the groupid for a given name or numeric ID.
+// ResolveGroupID returns the groupid for a given name or numeric ID, with the same rules
+// as ResolveGroup.
 func ResolveGroupID(c *api.Client, nameOrID string) (string, error) {
-	if isNumeric(nameOrID) {
-		return nameOrID, nil
-	}
-	g, err := GetGroupByName(c, nameOrID)
+	g, err := ResolveGroup(c, nameOrID)
 	if err != nil {
 		return "", err
 	}
 	return g.GroupID, nil
+}
+
+// ResolveGroup finds a host group by ID or by name. A name that is all digits (a group
+// called 2024) is looked up both ways: if the ID and the name are two different groups
+// the caller has to say which with id:N or name:N, instead of silently getting the one
+// with that ID.
+func ResolveGroup(c *api.Client, nameOrID string) (*Group, error) {
+	byID := func(id string) (*Group, error) {
+		raw, err := c.Call("hostgroup.get", map[string]any{"output": []string{"groupid", "name"}, "groupids": []string{id}})
+		if err != nil {
+			return nil, fmt.Errorf("hostgroup.get: %w", err)
+		}
+		var gs []Group
+		if err := json.Unmarshal(raw, &gs); err != nil {
+			return nil, fmt.Errorf("parsing group: %w", err)
+		}
+		if len(gs) == 0 {
+			return nil, &NotFoundError{Resource: "group", Query: id}
+		}
+		return &gs[0], nil
+	}
+	mode, v := splitQualifier(nameOrID)
+	switch {
+	case mode == "id":
+		return byID(v)
+	case mode == "name" || !isNumeric(v):
+		return GetGroupByName(c, v)
+	}
+	gid, ierr := byID(v)
+	gname, nerr := GetGroupByName(c, v)
+	for _, err := range []error{ierr, nerr} {
+		var nfe *NotFoundError
+		if err != nil && !errors.As(err, &nfe) {
+			return nil, err
+		}
+	}
+	switch {
+	case ierr == nil && nerr == nil && gid.GroupID != gname.GroupID:
+		return nil, &AmbiguousError{Resource: "group", Query: v, ByID: fmt.Sprintf("group %q", gid.Name), ByName: fmt.Sprintf("group %q (ID %s)", gname.Name, gname.GroupID)}
+	case ierr == nil:
+		return gid, nil
+	case nerr == nil:
+		return gname, nil
+	}
+	return nil, &NotFoundError{Resource: "group", Query: v}
 }
 
 // ResolveTemplateID returns the templateid for a given name or numeric ID.

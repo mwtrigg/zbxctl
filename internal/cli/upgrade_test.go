@@ -271,6 +271,8 @@ func TestNeverDowngrades(t *testing.T) {
 		// a release candidate is below the release it leads to, and a release never "upgrades" to its own rc
 		{"0.1.0", "v0.1.0-rc.1", true}, {"0.1.0-rc.1", "v0.1.0", false}, {"0.1.0-rc.2", "v0.1.0-rc.1", true},
 		{"0.1.0-rc.1", "v0.1.0-rc.1", false}, {"0.1.0-rc.1", "v0.1.0-rc.2", false},
+		// numeric identifiers compare as numbers, not text
+		{"0.1.0-rc.9", "v0.1.0-rc.10", false}, {"0.1.0-rc.10", "v0.1.0-rc.2", true}, {"0.1.0-rc.2", "v0.1.0-rc.10", false}, {"0.1.0-beta.1", "v0.1.0-rc.1", false}, {"0.1.0-rc.1", "v0.1.0-beta.9", true},
 	} {
 		if olderRelease(c.current, c.latest) != c.older {
 			t.Errorf("current %s, latest %s: older=%v want %v", c.current, c.latest, !c.older, c.older)

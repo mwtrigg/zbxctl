@@ -30,12 +30,13 @@ func resolveHostChanges(c *api.Client) (*hostChanges, error) {
 	}
 	group := func(names []string, verb string, into *[]string) error {
 		for _, n := range names {
-			id, err := resources.ResolveGroupID(c, n)
+			g, err := resources.ResolveGroup(c, n)
 			if err != nil {
 				return fmt.Errorf("group %q: %w", n, err)
 			}
-			*into = append(*into, id)
-			h.notes = append(h.notes, fmt.Sprintf("%s group %q", verb, n))
+			*into = append(*into, g.GroupID)
+			// the group that was actually found, so a dry run shows what an all-digit name resolved to
+			h.notes = append(h.notes, fmt.Sprintf("%s group %q (id %s)", verb, g.Name, g.GroupID))
 		}
 		return nil
 	}

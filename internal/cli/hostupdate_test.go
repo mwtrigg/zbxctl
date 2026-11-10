@@ -18,7 +18,22 @@ func hostWithTemplates(call rpcCall) fakeReply {
 	if call.Method == "host.update" {
 		return fakeReply{Result: `{"hostids":["10"]}`}
 	}
+	if call.Method == "hostgroup.get" {
+		return groupByID(call)
+	}
 	return templateByID(call)
+}
+
+// groupByID answers hostgroup.get for an ID lookup (group N is called GN) and finds nothing by name.
+func groupByID(call rpcCall) fakeReply {
+	if call.Method != "hostgroup.get" {
+		return fakeReply{}
+	}
+	if ids, ok := call.Params["groupids"].([]any); ok && len(ids) == 1 {
+		id := ids[0].(string)
+		return fakeReply{Result: `[{"groupid":"` + id + `","name":"G` + id + `"}]`}
+	}
+	return fakeReply{Result: "[]"}
 }
 
 // templateByID answers template.get for an ID lookup and finds nothing by name.
@@ -86,7 +101,7 @@ func TestClearTemplateIsExplicitAndSaysWhatItDestroys(t *testing.T) {
 func TestUpdateHostDryRunListsEveryChangeAndApplySavesBeforeState(t *testing.T) {
 	f := &fakeZabbix{Handler: hostWithTemplates}
 	out, _ := runFake(t, f, "update", "host", "web1", "--add-group", "2", "--remove-group", "3", "--add-template", "22", "--remove-template", "21", "--visible-name", "New")
-	for _, want := range []string{`add group \"2\"`, `remove group \"3\"`, `link template \"22\"`, `unlink`, `visible name to \"New\"`} {
+	for _, want := range []string{`add group \"G2\" (id 2)`, `remove group \"G3\" (id 3)`, `link template \"22\"`, `unlink`, `visible name to \"New\"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("the dry run must list %q:\n%s", want, out)
 		}
@@ -150,5 +165,40 @@ func TestUpdateHostVerifiesTheResult(t *testing.T) {
 	out, err := runFake(t, f, "update", "host", "web1", "--remove-template", "20", "--apply")
 	if err != nil || !strings.Contains(out, `"verified": true`) {
 		t.Fatalf("err=%v out=%s", err, out)
+	}
+}
+
+// R3-1 (correctness): a group called 2024 is not the group with ID 2024, and the dry run says
+// which group was found.
+func TestAllDigitGroupNamesAreNotTakenForIDs(t *testing.T) {
+	handler := func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "hostgroup.get":
+			if ids, ok := c.Params["groupids"].([]any); ok && len(ids) == 1 && ids[0] == "2024" {
+				return fakeReply{Result: `[{"groupid":"2024","name":"Decommission-NOW"}]`}
+			}
+			if flt, ok := c.Params["filter"].(map[string]any); ok {
+				if l, _ := flt["name"].([]any); len(l) == 1 && l[0] == "2024" {
+					return fakeReply{Result: `[{"groupid":"7","name":"2024"}]`}
+				}
+			}
+			return fakeReply{Result: "[]"}
+		}
+		return hostWithTemplates(c)
+	}
+	f := &fakeZabbix{Handler: handler}
+	_, err := runFake(t, f, "update", "host", "web1", "--add-group", "2024", "--apply")
+	if exitOf(err) != 5 || len(f.called("host.update")) != 0 {
+		t.Fatalf("an ambiguous group must stop (exit 5), nothing written: %v", err)
+	}
+	f = &fakeZabbix{Handler: handler}
+	out, err := runFake(t, f, "update", "host", "web1", "--add-group", "name:2024")
+	if err != nil || !strings.Contains(out, `add group \"2024\" (id 7)`) {
+		t.Fatalf("name: picks the group called 2024 and the dry run shows it: %v\n%s", err, out)
+	}
+	f = &fakeZabbix{Handler: handler}
+	out, err = runFake(t, f, "update", "host", "web1", "--add-group", "id:2024")
+	if err != nil || !strings.Contains(out, `Decommission-NOW`) {
+		t.Fatalf("id: picks the ID and the dry run shows its name: %v\n%s", err, out)
 	}
 }
