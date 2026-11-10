@@ -55,74 +55,23 @@ func printWriteResult(outFmt output.Format, fields map[string]any) error {
 var enableHostCmd = &cobra.Command{
 	Use:   "host <id|name>",
 	Short: "Enable a host (set status to monitored)",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runEnableHost,
 }
 
 var disableHostCmd = &cobra.Command{
 	Use:   "host <id|name>",
 	Short: "Disable a host (set status to unmonitored)",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runDisableHost,
 }
 
 func runEnableHost(cmd *cobra.Command, args []string) error {
-	return runSetHostStatus(args[0], true)
+	return runBulk(cmd, args, hostStatusSpec(true))
 }
 
 func runDisableHost(cmd *cobra.Command, args []string) error {
-	return runSetHostStatus(args[0], false)
-}
-
-func runSetHostStatus(idOrName string, enable bool) error {
-	c, outFmt, ctx, err := writeClient()
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	h, err := resources.GetHost(c, idOrName)
-	if err != nil {
-		var nfe *resources.NotFoundError
-		if errors.As(err, &nfe) {
-			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
-		}
-		return cliFail(outFmt, err)
-	}
-
-	action := "disable"
-	newStatus := "unmonitored"
-	if enable {
-		action = "enable"
-		newStatus = "monitored"
-	}
-
-	if !confirm(fmt.Sprintf("%s host %q (%s)?", action, h.Name, h.Host)) {
-		return nil
-	}
-
-	if enable {
-		err = resources.EnableHost(c, h.HostID)
-	} else {
-		err = resources.DisableHost(c, h.HostID)
-	}
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	return output.Print(outFmt, []output.Column{
-		{Key: "hostid", Header: "HOST_ID"},
-		{Key: "host", Header: "HOST"},
-		{Key: "name", Header: "NAME"},
-		{Key: "status", Header: "STATUS"},
-	}, []map[string]any{{
-		"hostid": h.HostID,
-		"host":   h.Host,
-		"name":   h.Name,
-		"status": newStatus,
-	}})
+	return runBulk(cmd, args, hostStatusSpec(false))
 }
 
 // ── enable/disable trigger ────────────────────────────────────────────────────
@@ -130,79 +79,23 @@ func runSetHostStatus(idOrName string, enable bool) error {
 var enableTriggerCmd = &cobra.Command{
 	Use:   "trigger <id>",
 	Short: "Enable a trigger",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runEnableTrigger,
 }
 
 var disableTriggerCmd = &cobra.Command{
 	Use:   "trigger <id>",
 	Short: "Disable a trigger",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runDisableTrigger,
 }
 
 func runEnableTrigger(cmd *cobra.Command, args []string) error {
-	return runSetTriggerStatus(args[0], true)
+	return runBulk(cmd, args, triggerStatusSpec(true))
 }
 
 func runDisableTrigger(cmd *cobra.Command, args []string) error {
-	return runSetTriggerStatus(args[0], false)
-}
-
-func runSetTriggerStatus(id string, enable bool) error {
-	c, outFmt, ctx, err := writeClient()
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	t, err := resources.GetTriggerByID(c, id)
-	if err != nil {
-		var nfe *resources.NotFoundError
-		if errors.As(err, &nfe) {
-			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
-		}
-		return cliFail(outFmt, err)
-	}
-
-	action := "disable"
-	newStatus := "disabled"
-	if enable {
-		action = "enable"
-		newStatus = "enabled"
-	}
-
-	hostName := ""
-	if len(t.Hosts) > 0 {
-		hostName = t.Hosts[0].Host
-	}
-
-	if !confirm(fmt.Sprintf("%s trigger %s %q (host: %s)?", action, t.TriggerID, t.Description, hostName)) {
-		return nil
-	}
-
-	if enable {
-		err = resources.EnableTrigger(c, t.TriggerID)
-	} else {
-		err = resources.DisableTrigger(c, t.TriggerID)
-	}
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	return output.Print(outFmt, []output.Column{
-		{Key: "triggerid", Header: "TRIGGER_ID"},
-		{Key: "host", Header: "HOST"},
-		{Key: "description", Header: "DESCRIPTION"},
-		{Key: "status", Header: "STATUS"},
-	}, []map[string]any{{
-		"triggerid":   t.TriggerID,
-		"host":        hostName,
-		"description": t.Description,
-		"status":      newStatus,
-	}})
+	return runBulk(cmd, args, triggerStatusSpec(false))
 }
 
 // ── acknowledge ───────────────────────────────────────────────────────────────
@@ -220,7 +113,7 @@ var (
 var acknowledgeCmd = &cobra.Command{
 	Use:   "acknowledge <event-id>",
 	Short: "Acknowledge an event",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runAcknowledge,
 }
 
@@ -232,82 +125,6 @@ func init() {
 	acknowledgeCmd.Flags().StringVar(&ackSuppressUntil, "until", "", "with --suppress: suppress until this time (unix, RFC3339, YYYY-MM-DD, 24h, 7d); default indefinitely")
 	acknowledgeCmd.Flags().BoolVar(&ackUnsuppress, "unsuppress", false, "lift a suppression")
 	acknowledgeCmd.Flags().StringVar(&ackSeverity, "severity", "", "also change the problem severity (0-5 or name)")
-}
-
-func runAcknowledge(cmd *cobra.Command, args []string) error {
-	c, outFmt, ctx, err := writeClient()
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	eventID := args[0]
-
-	p := resources.AcknowledgeParams{EventID: eventID, Message: ackMessage, Close: ackClose, Severity: -1, Action: resources.ActionAcknowledge}
-	exclusive := 0
-	for _, on := range []bool{ackUnack, ackSuppress, ackUnsuppress} {
-		if on {
-			exclusive++
-		}
-	}
-	if exclusive > 1 {
-		return cliPrintErr(outFmt, "--unacknowledge, --suppress and --unsuppress are mutually exclusive", output.ExitUsage)
-	}
-	if exclusive == 1 && ackClose {
-		return cliPrintErr(outFmt, "--close only applies when acknowledging", output.ExitUsage)
-	}
-	if ackSuppressUntil != "" && !ackSuppress {
-		return cliPrintErr(outFmt, "--until only applies with --suppress", output.ExitUsage)
-	}
-	verb := "acknowledge"
-	switch {
-	case ackUnack:
-		p.Action, verb = resources.ActionUnacknowledge, "unacknowledge"
-	case ackSuppress:
-		p.Action, verb = resources.ActionSuppress, "suppress"
-		if ackSuppressUntil != "" {
-			ts, err := parseTimestamp(ackSuppressUntil)
-			if err != nil {
-				return cliFail(outFmt, err)
-			}
-			p.SuppressUntil = ts
-		}
-	case ackUnsuppress:
-		p.Action, verb = resources.ActionUnsuppress, "unsuppress"
-	case ackClose:
-		verb = "acknowledge and close"
-	}
-	if ackSeverity != "" {
-		sev, ok := parseSeverityFlag(ackSeverity)
-		if !ok {
-			return cliPrintErr(outFmt, fmt.Sprintf("invalid --severity %q: use 0-5 or a severity name", ackSeverity), output.ExitUsage)
-		}
-		p.Severity = sev
-	}
-
-	if !confirm(fmt.Sprintf("%s event %s?", verb, eventID)) {
-		return nil
-	}
-	if err := resources.AcknowledgeEvent(c, p); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	row := map[string]any{"eventid": eventID, "action": string(p.Action)}
-	if ackClose && p.Action == resources.ActionAcknowledge {
-		row["closed"] = true
-	}
-	if ackMessage != "" {
-		row["message"] = ackMessage
-	}
-	if p.Severity >= 0 {
-		row["severity"] = severityLabel(strconv.Itoa(p.Severity))
-	}
-	return output.Print(outFmt, []output.Column{
-		{Key: "eventid", Header: "EVENT_ID"},
-		{Key: "action", Header: "ACTION"},
-	}, []map[string]any{row})
 }
 
 // parseSeverityFlag accepts 0-5 or a severity name.
@@ -442,45 +259,8 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 var maintenanceDeleteCmd = &cobra.Command{
 	Use:   "delete <id|name>",
 	Short: "Delete a maintenance window",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runMaintenanceDelete,
-}
-
-func runMaintenanceDelete(cmd *cobra.Command, args []string) error {
-	c, outFmt, ctx, err := writeClient()
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-	if err := ctx.CheckPermission("operator"); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	m, err := resources.ResolveMaintenance(c, args[0])
-	if err != nil {
-		var nfe *resources.NotFoundError
-		if errors.As(err, &nfe) {
-			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
-		}
-		return cliFail(outFmt, err)
-	}
-
-	if !confirm(fmt.Sprintf("delete maintenance %q (%s)?", m.Name, m.MaintenanceID)) {
-		return nil
-	}
-
-	if err := resources.DeleteMaintenance(c, m.MaintenanceID); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	return output.Print(outFmt, []output.Column{
-		{Key: "maintenanceid", Header: "MAINTENANCE_ID"},
-		{Key: "name", Header: "NAME"},
-		{Key: "status", Header: "STATUS"},
-	}, []map[string]any{{
-		"maintenanceid": m.MaintenanceID,
-		"name":          m.Name,
-		"status":        "deleted",
-	}})
 }
 
 // ── maintenance get ───────────────────────────────────────────────────────────
@@ -604,7 +384,7 @@ var deleteCmd = &cobra.Command{Use: "delete", Short: "Delete resources"}
 var deleteHostCmd = &cobra.Command{
 	Use:   "host <id|name>",
 	Short: "Delete a Zabbix host",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runDeleteHost,
 }
 
@@ -781,41 +561,6 @@ func runUpdateHost(_ *cobra.Command, args []string) error {
 	})
 }
 
-func runDeleteHost(_ *cobra.Command, args []string) error {
-	c, outFmt, ctx, err := writeClient()
-	if err != nil {
-		return cliFail(output.Format(flagOutput), err)
-	}
-	if err := ctx.CheckPermission("write"); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	host, err := resources.GetHost(c, args[0])
-	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
-	}
-
-	if !confirm(fmt.Sprintf("delete host %q (id: %s)?", host.Host, host.HostID)) {
-		return nil
-	}
-
-	_, err = resources.DeleteHost(c, host.HostID)
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	if outFmt == output.FormatTable {
-		fmt.Printf("deleted host %s (id: %s)\n", host.Host, host.HostID)
-		return nil
-	}
-	return printWriteResult(outFmt, map[string]any{
-		"hostid": host.HostID,
-		"host":   host.Host,
-		"name":   host.Name,
-		"status": hostStatusLabel(host.Status),
-	})
-}
-
 // generateToken returns a 6-character random alphanumeric string for run script confirmation.
 func generateToken() (string, error) {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -970,4 +715,58 @@ func runRunScript(_ *cobra.Command, args []string) error {
 		"response":    result.Response,
 		"value":       result.Value,
 	}})
+}
+
+func runMaintenanceDelete(cmd *cobra.Command, args []string) error {
+	return runBulk(cmd, args, maintenanceDeleteSpec())
+}
+
+func runDeleteHost(cmd *cobra.Command, args []string) error {
+	return runBulk(cmd, args, deleteHostSpec())
+}
+
+func runAcknowledge(cmd *cobra.Command, args []string) error {
+	outFmt := output.Format(flagOutput)
+	p := resources.AcknowledgeParams{Message: ackMessage, Close: ackClose, Severity: -1, Action: resources.ActionAcknowledge}
+	exclusive := 0
+	for _, on := range []bool{ackUnack, ackSuppress, ackUnsuppress} {
+		if on {
+			exclusive++
+		}
+	}
+	if exclusive > 1 {
+		return cliPrintErr(outFmt, "--unacknowledge, --suppress and --unsuppress are mutually exclusive", output.ExitUsage)
+	}
+	if exclusive == 1 && ackClose {
+		return cliPrintErr(outFmt, "--close only applies when acknowledging", output.ExitUsage)
+	}
+	if ackSuppressUntil != "" && !ackSuppress {
+		return cliPrintErr(outFmt, "--until only applies with --suppress", output.ExitUsage)
+	}
+	verb := "acknowledge"
+	switch {
+	case ackUnack:
+		p.Action, verb = resources.ActionUnacknowledge, "unacknowledge"
+	case ackSuppress:
+		p.Action, verb = resources.ActionSuppress, "suppress"
+		if ackSuppressUntil != "" {
+			ts, err := parseTimestamp(ackSuppressUntil)
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			p.SuppressUntil = ts
+		}
+	case ackUnsuppress:
+		p.Action, verb = resources.ActionUnsuppress, "unsuppress"
+	case ackClose:
+		verb = "acknowledge and close"
+	}
+	if ackSeverity != "" {
+		sev, ok := parseSeverityFlag(ackSeverity)
+		if !ok {
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --severity %q: use 0-5 or a severity name", ackSeverity), output.ExitUsage)
+		}
+		p.Severity = sev
+	}
+	return runBulk(cmd, args, ackSpec(p, verb))
 }

@@ -83,6 +83,8 @@ import template|host <file>       # without --apply: shows the diff only
 run script <name> --host <host>   # dangerous: executes code on a monitored host
 ```
 
+Bulk writes: `enable|disable host|trigger`, `acknowledge`, `maintenance delete` and `delete host` take several targets (arguments and/or `--id-file`, one per line). All targets are resolved first, so a typo changes nothing; `--expect N` refuses to run unless exactly N distinct targets resolve; with `--apply` a before-state file is saved under `~/.local/state/zbxctl/` (`--state-dir`, `--no-state`) and every change is re-read to verify it (`--no-verify` skips that). `acknowledge --close` only closes problems whose trigger allows manual close and acknowledges the others instead, then re-checks after about 15 seconds since closing is asynchronous.
+
 `delete user` refuses `Admin` and the user that owns the credentials in use. `create user` takes the password from `--password-file` or `--password-stdin`, never from a flag value.
 
 Export, diff and import of templates and hosts:
