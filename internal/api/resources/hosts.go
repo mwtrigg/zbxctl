@@ -6,17 +6,92 @@ import (
 	"fmt"
 	"unicode"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // Host represents a Zabbix host object.
 type Host struct {
 	HostID      string `json:"hostid"`
-	Host        string `json:"host"`        // technical name
-	Name        string `json:"name"`        // visible name
-	Status      string `json:"status"`      // "0"=monitored, "1"=unmonitored
-	Available   string `json:"available"`   // "0"=unknown, "1"=available, "2"=unavailable
+	Host        string `json:"host"`      // technical name
+	Name        string `json:"name"`      // visible name
+	Status      string `json:"status"`    // "0"=monitored, "1"=unmonitored
+	Available   string `json:"available"` // "0"=unknown, "1"=available, "2"=unavailable
 	Description string `json:"description"`
+
+	// Populated via select* parameters (see hostSelects).
+	HostGroups      []NamedRef  `json:"hostgroups"`
+	ParentTemplates []NamedRef  `json:"parentTemplates"`
+	Interfaces      []HostIface `json:"interfaces"`
+	Tags            []HostTag   `json:"tags"`
+	Macros          []HostMacro `json:"macros"`
+}
+
+// NamedRef is a linked object reduced to its name.
+type NamedRef struct {
+	Name string `json:"name"`
+}
+
+// HostIface is a host interface as returned by selectInterfaces.
+type HostIface struct {
+	IP        string `json:"ip"`
+	DNS       string `json:"dns"`
+	Port      string `json:"port"`
+	Main      string `json:"main"`
+	Available string `json:"available"` // "0"=unknown, "1"=available, "2"=unavailable
+}
+
+// HostTag is a host tag.
+type HostTag struct {
+	Tag   string `json:"tag"`
+	Value string `json:"value"`
+}
+
+// HostMacro is a user macro. Secret macros (type "1") carry no value.
+type HostMacro struct {
+	Macro string `json:"macro"`
+	Value string `json:"value"`
+	Type  string `json:"type"`
+}
+
+// AvailableState summarises interface availability. Zabbix 7.x moved
+// availability from the host to its interfaces, so host.get no longer
+// returns a usable "available" field.
+func (h Host) AvailableState() string {
+	state := "0"
+	for _, i := range h.Interfaces {
+		switch i.Available {
+		case "2":
+			return "2"
+		case "1":
+			state = "1"
+		}
+	}
+	return state
+}
+
+// GroupNames returns the names of the host's groups.
+func (h Host) GroupNames() []string { return names(h.HostGroups) }
+
+// TemplateNames returns the names of directly linked templates.
+func (h Host) TemplateNames() []string { return names(h.ParentTemplates) }
+
+func names(refs []NamedRef) []string {
+	out := make([]string, 0, len(refs))
+	for _, r := range refs {
+		out = append(out, r.Name)
+	}
+	return out
+}
+
+// hostSelects adds the related-object selects. detail adds tags and macros.
+func hostSelects(params map[string]any, detail bool) {
+	params["selectHostGroups"] = []string{"name"}
+	params["selectParentTemplates"] = []string{"name"}
+	params["selectInterfaces"] = []string{"ip", "dns", "port", "main", "available"}
+	if detail {
+		params["selectTags"] = []string{"tag", "value"}
+		params["selectMacros"] = []string{"macro", "value", "type"}
+	}
 }
 
 // HostFilter controls which hosts are returned by GetHosts.
@@ -32,8 +107,9 @@ type HostFilter struct {
 // GetHosts returns a filtered list of hosts.
 func GetHosts(c *api.Client, f HostFilter) ([]Host, error) {
 	params := map[string]any{
-		"output": []string{"hostid", "host", "name", "status", "available", "description"},
+		"output": []string{"hostid", "host", "name", "status", "description"},
 	}
+	hostSelects(params, false)
 	if len(f.GroupIDs) > 0 {
 		params["groupids"] = f.GroupIDs
 	}
@@ -61,7 +137,7 @@ func GetHosts(c *api.Client, f HostFilter) ([]Host, error) {
 	}
 	params["sortorder"] = so
 
-	raw, err := c.Call("host.get", params)
+	raw, err := c.CallList("host.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("host.get: %w", err)
 	}
@@ -75,7 +151,7 @@ func GetHosts(c *api.Client, f HostFilter) ([]Host, error) {
 // GetHost returns a single host by numeric ID, technical name, or visible name.
 // Lookup order: numeric ID → technical name (host field) → visible name (name field).
 func GetHost(c *api.Client, idOrName string) (*Host, error) {
-	outputFields := []string{"hostid", "host", "name", "status", "available", "description"}
+	outputFields := []string{"hostid", "host", "name", "status", "description"}
 
 	if isNumeric(idOrName) {
 		return hostGetOne(c, outputFields, map[string]any{
@@ -103,6 +179,7 @@ func GetHost(c *api.Client, idOrName string) (*Host, error) {
 
 func hostGetOne(c *api.Client, outputFields []string, extraParams map[string]any, query string) (*Host, error) {
 	params := map[string]any{"output": outputFields}
+	hostSelects(params, true)
 	for k, v := range extraParams {
 		params[k] = v
 	}
@@ -214,8 +291,8 @@ func ResolveHostNames(c *api.Client, hostIDs []string) (map[string]string, error
 
 // InterfaceInput describes a host interface for create/update operations.
 type InterfaceInput struct {
-	Type          int    // 1=agent, 2=snmp, 3=ipmi, 4=jmx
-	UseIP         int    // 1=IP, 0=DNS
+	Type          int // 1=agent, 2=snmp, 3=ipmi, 4=jmx
+	UseIP         int // 1=IP, 0=DNS
 	IP            string
 	DNS           string
 	Port          string

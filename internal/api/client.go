@@ -6,12 +6,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/config"
+	"github.com/mwtrigg/zbxctl/internal/config"
 )
 
 // RPCError represents a Zabbix JSON-RPC error response.
@@ -28,11 +30,29 @@ func (e *RPCError) Error() string {
 	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
 }
 
+// Sentinel errors the CLI maps to exit codes.
+var (
+	ErrConnect = errors.New("cannot reach Zabbix")
+	ErrAuth    = errors.New("authentication failed")
+)
+
+// IsAuth reports whether the RPC error means the token or login was refused.
+func (e *RPCError) IsAuth() bool {
+	m := strings.ToLower(e.Message + " " + e.Data)
+	return strings.Contains(m, "not authorised") || strings.Contains(m, "not authorized") ||
+		strings.Contains(m, "session terminated") || strings.Contains(m, "incorrect user name or password") ||
+		strings.Contains(m, "api token")
+}
+
 // Client is a Zabbix JSON-RPC 2.0 client.
 type Client struct {
 	httpClient  *http.Client
 	endpoint    string
 	bearerToken string // pre-auth header token (api_token or session token)
+
+	// Filters are exact-match KEY=VALUE pairs (--filter) merged into the API
+	// "filter" object of list calls made through CallList.
+	Filters map[string][]string
 }
 
 type rpcRequest struct {
@@ -102,6 +122,41 @@ func (c *Client) Call(method string, params any) (json.RawMessage, error) {
 	return c.callRaw(context.Background(), method, params)
 }
 
+// CallList is Call for list queries: it merges c.Filters into params["filter"].
+// Zabbix ignores filter keys placed at the top level of params, so they must
+// live inside the filter object.
+func (c *Client) CallList(method string, params map[string]any) (json.RawMessage, error) {
+	if len(c.Filters) > 0 {
+		f, _ := params["filter"].(map[string]any)
+		if f == nil {
+			f = map[string]any{}
+		}
+		for k, v := range c.Filters {
+			f[k] = v
+		}
+		params["filter"] = f
+	}
+	return c.Call(method, params)
+}
+
+// CurrentUser returns the user the credentials belong to. Zabbix requires
+// user.checkAuthentication to be called without an Authorization header.
+func (c *Client) CurrentUser() (userID, username string, err error) {
+	tmp := &Client{httpClient: c.httpClient, endpoint: c.endpoint}
+	raw, err := tmp.callRaw(context.Background(), "user.checkAuthentication", map[string]any{"token": c.bearerToken})
+	if err != nil {
+		return "", "", err
+	}
+	var u struct {
+		UserID   string `json:"userid"`
+		Username string `json:"username"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return "", "", fmt.Errorf("parsing current user: %w", err)
+	}
+	return u.UserID, u.Username, nil
+}
+
 // APIVersion calls apiinfo.version (no authentication required).
 func (c *Client) APIVersion() (string, error) {
 	// Use a client without auth header for this call.
@@ -141,9 +196,12 @@ func (c *Client) callRaw(ctx context.Context, method string, params any) (json.R
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, fmt.Errorf("%w: %v", ErrConnect, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("%w: HTTP %d", ErrAuth, resp.StatusCode)
+	}
 
 	var rpcResp rpcResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // TriggerHost is a minimal host reference embedded in trigger results.
@@ -17,10 +17,10 @@ type TriggerHost struct {
 type Trigger struct {
 	TriggerID   string        `json:"triggerid"`
 	Description string        `json:"description"`
-	Priority    string        `json:"priority"`    // 0–5
-	Status      string        `json:"status"`      // "0"=enabled, "1"=disabled
-	Value       string        `json:"value"`       // "0"=OK, "1"=PROBLEM
-	LastChange  string        `json:"lastchange"`  // Unix timestamp
+	Priority    string        `json:"priority"`   // 0–5
+	Status      string        `json:"status"`     // "0"=enabled, "1"=disabled
+	Value       string        `json:"value"`      // "0"=OK, "1"=PROBLEM
+	LastChange  string        `json:"lastchange"` // Unix timestamp
 	Hosts       []TriggerHost `json:"hosts"`
 }
 
@@ -74,7 +74,7 @@ func GetTriggers(c *api.Client, f TriggerFilter) ([]Trigger, error) {
 	params["sortfield"] = sf
 	params["sortorder"] = so
 
-	raw, err := c.Call("trigger.get", params)
+	raw, err := c.CallList("trigger.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("trigger.get: %w", err)
 	}

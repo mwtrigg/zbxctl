@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // Maintenance represents a Zabbix maintenance window.
 type Maintenance struct {
-	MaintenanceID string `json:"maintenanceid"`
-	Name          string `json:"name"`
-	ActiveSince   string `json:"active_since"`  // Unix timestamp
-	ActiveTill    string `json:"active_till"`   // Unix timestamp
-	Description   string `json:"description"`
+	MaintenanceID   string `json:"maintenanceid"`
+	Name            string `json:"name"`
+	ActiveSince     string `json:"active_since"` // Unix timestamp
+	ActiveTill      string `json:"active_till"`  // Unix timestamp
+	Description     string `json:"description"`
 	MaintenanceType string `json:"maintenance_type"` // "0"=with data collection, "1"=without
 }
 
@@ -32,7 +32,7 @@ func GetMaintenances(c *api.Client, f MaintenanceFilter) ([]Maintenance, error) 
 	if f.Limit > 0 {
 		params["limit"] = f.Limit
 	}
-	raw, err := c.Call("maintenance.get", params)
+	raw, err := c.CallList("maintenance.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("maintenance.get: %w", err)
 	}
@@ -65,11 +65,11 @@ func GetMaintenanceByName(c *api.Client, name string) (*Maintenance, error) {
 
 // CreateMaintenanceParams holds parameters for creating a maintenance window.
 type CreateMaintenanceParams struct {
-	Name      string
-	HostIDs   []string
-	GroupIDs  []string
-	ActiveSince int64  // Unix timestamp — start
-	ActiveTill  int64  // Unix timestamp — end (ActiveSince + duration)
+	Name        string
+	HostIDs     []string
+	GroupIDs    []string
+	ActiveSince int64 // Unix timestamp — start
+	ActiveTill  int64 // Unix timestamp — end (ActiveSince + duration)
 	Description string
 }
 
@@ -93,10 +93,20 @@ func CreateMaintenance(c *api.Client, p CreateMaintenanceParams) (string, error)
 		params["description"] = p.Description
 	}
 	if len(p.HostIDs) > 0 {
-		params["hostids"] = p.HostIDs
+		// maintenance.create takes host objects; the old "hostids" parameter
+		// was removed from the API.
+		hosts := make([]map[string]string, len(p.HostIDs))
+		for i, id := range p.HostIDs {
+			hosts[i] = map[string]string{"hostid": id}
+		}
+		params["hosts"] = hosts
 	}
 	if len(p.GroupIDs) > 0 {
-		params["groupids"] = p.GroupIDs
+		groups := make([]map[string]string, len(p.GroupIDs))
+		for i, id := range p.GroupIDs {
+			groups[i] = map[string]string{"groupid": id}
+		}
+		params["groups"] = groups
 	}
 
 	raw, err := c.Call("maintenance.create", params)
@@ -134,8 +144,8 @@ func DeleteMaintenance(c *api.Client, maintenanceID string) error {
 func ResolveMaintenance(c *api.Client, idOrName string) (*Maintenance, error) {
 	if isNumeric(idOrName) {
 		params := map[string]any{
-			"output":          []string{"maintenanceid", "name", "active_since", "active_till", "description", "maintenance_type"},
-			"maintenanceids":  []string{idOrName},
+			"output":         []string{"maintenanceid", "name", "active_since", "active_till", "description", "maintenance_type"},
+			"maintenanceids": []string{idOrName},
 		}
 		raw, err := c.Call("maintenance.get", params)
 		if err != nil {

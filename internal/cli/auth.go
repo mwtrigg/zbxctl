@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
-	"codeberg.org/mwtrigg/zbxctl/internal/config"
-	"codeberg.org/mwtrigg/zbxctl/internal/output"
+	"github.com/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/config"
+	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
 var authCmd = &cobra.Command{
@@ -30,7 +30,7 @@ func runAuthStatus(cmd *cobra.Command, args []string) error {
 
 	cfg, ctx, err := config.LoadConfig(flagContext)
 	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitError)
+		return cliFail(outFmt, err)
 	}
 
 	// Apply --insecure flag.

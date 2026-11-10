@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
-	"golang.org/x/term"
 )
 
 // Exit codes.
@@ -16,7 +17,54 @@ const (
 	ExitError     = 1
 	ExitNotFound  = 2
 	ExitAuthError = 3
+	ExitConnect   = 4 // cannot reach Zabbix
+	ExitUsage     = 5 // invalid arguments or flags
 )
+
+// Raw includes the raw API values (*_raw, *_unix) next to the readable ones.
+var Raw bool
+
+// Field, when set, makes Print emit just that field of each row, one value
+// per line (list values one element per line).
+var Field string
+
+// Command is the command path reported in the JSON envelope's meta.
+var Command string
+
+// KindFor maps an exit code to a stable machine-readable error kind.
+func KindFor(code int) string {
+	switch code {
+	case ExitNotFound:
+		return "not_found"
+	case ExitAuthError:
+		return "auth"
+	case ExitConnect:
+		return "connection"
+	case ExitUsage:
+		return "usage"
+	default:
+		return "error"
+	}
+}
+
+// stripRaw drops the raw duplicates unless --raw was given.
+func stripRaw(rows []map[string]any) []map[string]any {
+	if Raw {
+		return rows
+	}
+	out := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		m := make(map[string]any, len(row))
+		for k, v := range row {
+			if strings.HasSuffix(k, "_raw") || strings.HasSuffix(k, "_unix") {
+				continue
+			}
+			m[k] = v
+		}
+		out[i] = m
+	}
+	return out
+}
 
 // Format is the output format.
 type Format string
@@ -35,6 +83,10 @@ type Column struct {
 
 // Print writes rows to stdout in the requested format.
 func Print(format Format, columns []Column, rows []map[string]any) error {
+	if Field != "" {
+		return printField(rows)
+	}
+	rows = stripRaw(rows)
 	switch format {
 	case FormatJSON:
 		return printJSON(columns, rows)
@@ -82,7 +134,7 @@ func printTable(columns []Column, rows []map[string]any) error {
 	for _, row := range rows {
 		r := make(table.Row, len(columns))
 		for i, c := range columns {
-			r[i] = row[c.Key]
+			r[i] = cell(row[c.Key])
 		}
 		t.AppendRow(r)
 	}
@@ -95,16 +147,19 @@ func printJSON(_ []Column, rows []map[string]any) error {
 	envelope := map[string]any{
 		"data": rows,
 		"meta": map[string]any{
-			"count": len(rows),
+			"count":   len(rows),
+			"command": Command,
 		},
 	}
 	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	return enc.Encode(envelope)
 }
 
 func printJSONL(_ []Column, rows []map[string]any) error {
 	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
 	for _, row := range rows {
 		if err := enc.Encode(row); err != nil {
 			return err
@@ -131,16 +186,53 @@ func PrintError(format Format, msg string, code int) {
 	switch format {
 	case FormatJSON, FormatJSONL:
 		enc := json.NewEncoder(os.Stderr)
-		_ = enc.Encode(map[string]any{"error": msg, "code": code})
+		_ = enc.Encode(map[string]any{"error": msg, "kind": KindFor(code), "code": code})
 	default:
 		fmt.Fprintf(os.Stderr, "error: %s\n", msg)
 	}
 }
 
-// DefaultFormat returns FormatTable if stdout is a TTY, FormatJSONL otherwise.
-func DefaultFormat() Format {
-	if term.IsTerminal(int(os.Stdout.Fd())) {
-		return FormatTable
+// DefaultFormat is JSON: agents are the primary users. Use -o table for humans.
+func DefaultFormat() Format { return FormatJSON }
+
+// cell renders list values compactly for table output.
+func cell(v any) any {
+	if l, ok := v.([]string); ok {
+		if len(l) == 0 {
+			return "-"
+		}
+		return strings.Join(l, ",")
 	}
-	return FormatJSONL
+	return v
+}
+
+// FieldError is returned when --field names a field that does not exist.
+type FieldError struct{ Msg string }
+
+func (e *FieldError) Error() string { return e.Msg }
+
+func printField(rows []map[string]any) error {
+	for _, row := range rows {
+		v, ok := row[Field]
+		if !ok {
+			keys := make([]string, 0, len(row))
+			for k := range row {
+				if !strings.HasSuffix(k, "_raw") && !strings.HasSuffix(k, "_unix") {
+					keys = append(keys, k)
+				}
+			}
+			sort.Strings(keys)
+			return &FieldError{fmt.Sprintf("no such field %q (available: %s)", Field, strings.Join(keys, ", "))}
+		}
+		switch t := v.(type) {
+		case nil:
+		case []string:
+			for _, e := range t {
+				fmt.Println(e)
+			}
+		default:
+			fmt.Println(t)
+		}
+	}
+	return nil
 }

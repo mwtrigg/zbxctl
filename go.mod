@@ -1,4 +1,4 @@
-module codeberg.org/mwtrigg/zbxctl
+module github.com/mwtrigg/zbxctl
 
 go 1.25.0
 
