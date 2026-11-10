@@ -67,6 +67,7 @@ get hosts | host | items | latestdata | history | interfaces
 get triggers | problems | events | alerts
 get templates | template | groups | users | user | usergroups | scripts
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
+diagnose trigger <id>|<event> --event   # why a problem is open: disabled trigger/host/items, unsupported items, suppression, manual close off
 auth status | context list | context use <name>
 ```
 

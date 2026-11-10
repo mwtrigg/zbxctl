@@ -620,6 +620,15 @@ var capabilities = []CommandSchema{
 		},
 	},
 	{
+		Command:     "diagnose trigger",
+		Description: "Explain why a problem is open and whether it can recover: disabled trigger, host or items, unsupported items, suppression or maintenance, manual close off. Pass a trigger ID, or an event ID with --event. Always JSON or JSONL.",
+		Flags: append(globalFlags(),
+			FlagSchema{Name: "event", Type: "bool", Description: "The argument is an event ID; diagnose that event's trigger.", Required: false, Default: false},
+		),
+		OutputFields: []string{"trigger{triggerid,description,severity,hosts,enabled,state,manual_close}", "open_problems[]", "items[]", "reasons[]", "recoverable", "meta{generated_at}"},
+		Examples:     []string{"zbxctl diagnose trigger 13472", "zbxctl diagnose trigger 126 --event"},
+	},
+	{
 		Command:     "diagnose host",
 		Description: "Single-call composite snapshot for agent-driven triage. Returns open problems, recent events, latest metric values, broken items, and interface availability. Always JSON or JSONL.",
 		Flags: append(globalFlags(),
@@ -636,7 +645,7 @@ var capabilities = []CommandSchema{
 // globalFlags returns the flags that appear on every command.
 func globalFlags() []FlagSchema {
 	return []FlagSchema{
-		{Name: "output", Type: "string", Description: "Output format: table|json|jsonl. Defaults to table on TTY, jsonl otherwise.", Required: false, Default: "table"},
+		{Name: "output", Type: "string", Description: "Output format: json|jsonl|table. Default json.", Required: false, Default: "json"},
 		{Name: "context", Type: "string", Description: "Override the active context.", Required: false, Default: ""},
 		{Name: "insecure", Type: "bool", Description: "Disable TLS verification (emits a warning).", Required: false, Default: false},
 	}
