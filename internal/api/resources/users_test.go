@@ -244,3 +244,50 @@ func TestGetTemplateFallsBackToVisibleName(t *testing.T) {
 		t.Fatalf("tpl=%v err=%v calls=%d", tpl, err, n)
 	}
 }
+
+func problemFixture() map[string]string {
+	return map[string]string{
+		"problem.get": `[
+			{"eventid":"4","objectid":"14","name":"d","severity":"3","clock":"4","suppressed":"1","suppression_data":[{"maintenanceid":"7","suppress_until":"0"}]},
+			{"eventid":"3","objectid":"13","name":"c","severity":"3","clock":"3","suppressed":"0"},
+			{"eventid":"2","objectid":"12","name":"b","severity":"3","clock":"2","suppressed":"0"},
+			{"eventid":"1","objectid":"11","name":"a","severity":"3","clock":"1","suppressed":"0"}]`,
+		"trigger.get": `[
+			{"triggerid":"11","status":"1","hosts":[{"host":"h1","status":"0"}],"items":[{"status":"0"}]},
+			{"triggerid":"12","status":"0","hosts":[{"host":"h2","status":"1"}],"items":[{"status":"0"}]},
+			{"triggerid":"13","status":"0","hosts":[{"host":"h3","status":"0"}],"items":[{"status":"1"},{"status":"1"}]},
+			{"triggerid":"14","status":"0","hosts":[{"host":"h4","status":"0"}],"items":[{"status":"0"}]}]`,
+	}
+}
+
+func TestProblemOrphansAndSuppression(t *testing.T) {
+	c, _ := newFake(t, problemFixture())
+	ps, err := GetProblems(c, ProblemFilter{MinSeverity: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"1": "trigger disabled", "2": "host disabled", "3": "items disabled", "4": ""}
+	for _, p := range ps {
+		if p.Orphan != want[p.EventID] {
+			t.Errorf("event %s orphan=%q want %q", p.EventID, p.Orphan, want[p.EventID])
+		}
+	}
+	if !ps[0].IsSuppressed() || !ps[0].MaintenanceSuppressed() || ps[0].Host != "h4" {
+		t.Errorf("suppression/host not filled: %+v", ps[0])
+	}
+}
+
+func TestProblemClientFiltersApplyLimitAfterFiltering(t *testing.T) {
+	c, calls := newFake(t, problemFixture())
+	ps, err := GetProblems(c, ProblemFilter{MinSeverity: -1, NoOrphans: true, Limit: 1})
+	if err != nil || len(ps) != 1 || ps[0].EventID != "4" {
+		t.Fatalf("ps=%+v err=%v", ps, err)
+	}
+	if _, sent := (*calls)[0]["params"].(map[string]any)["limit"]; sent {
+		t.Fatal("limit must not be sent to problem.get when filtering client-side")
+	}
+	ms, _ := GetProblems(c, ProblemFilter{MinSeverity: -1, Maintenance: true})
+	if len(ms) != 1 || ms[0].EventID != "4" {
+		t.Fatalf("maintenance filter: %+v", ms)
+	}
+}

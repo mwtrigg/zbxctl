@@ -97,7 +97,9 @@ zbxctl import template web-base.yaml --apply             # never deletes anythin
 
 Housekeeping: `version`, `upgrade [--check]`, `completion bash|zsh|fish|powershell`.
 
-`--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `--host` and `--group` accept an ID or a name.
+`--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `get problems` triage flags: `--exclude-orphans` drops problems that can never recover (trigger, host or all items disabled), `--suppressed true|false` and `--maintenance` filter on suppression, `--group-by name` collapses the same alert across hosts into one row with a count, the hosts and the event IDs (handy for `acknowledge`).
+
+`--host` and `--group` accept an ID or a name.
 
 On list commands `--filter KEY=VALUE` (repeatable) adds an exact-match API filter and `--field NAME` prints just that field, one value per line, for shell use.
 

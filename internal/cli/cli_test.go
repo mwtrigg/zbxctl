@@ -92,3 +92,10 @@ func TestUserDeleteBlocks(t *testing.T) {
 		t.Errorf("ordinary user refused: %v", err)
 	}
 }
+
+func TestNormalizeProblemName(t *testing.T) {
+	p := resources.Problem{Name: "/boot is low on web-01 (below 700M)", Hosts: []string{"web-01"}}
+	if got := normalizeProblemName(p); got != "/boot is low on {HOST} (below 700M)" {
+		t.Fatalf("got %q", got)
+	}
+}
