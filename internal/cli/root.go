@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/output"
+	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
 var (

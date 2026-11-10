@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"os"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/config"
+	"github.com/mwtrigg/zbxctl/internal/config"
 )
 
 // RPCError represents a Zabbix JSON-RPC error response.

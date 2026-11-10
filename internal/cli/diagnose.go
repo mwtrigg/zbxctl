@@ -10,8 +10,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api/resources"
-	"codeberg.org/mwtrigg/zbxctl/internal/output"
+	"github.com/mwtrigg/zbxctl/internal/api/resources"
+	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
 var diagSince string
