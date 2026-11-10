@@ -65,6 +65,7 @@ Read (never change anything):
 ```
 get hosts | host | items | latestdata | history | trends | interfaces
 get triggers | problems | events | alerts
+get discovery | lost items | lost triggers
 get templates | template | groups | users | user | usergroups | scripts
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
 diagnose trigger <id>|<event> --event   # why a problem is open: disabled trigger/host/items, unsupported items, suppression, manual close off
@@ -80,6 +81,7 @@ maintenance list | create | extend | shorten | delete
 create host | update host | delete host
 tag host <host> --tag k [--value v]   untag host <host> --tag k [--value v]
 create user | delete user | create usergroup | delete usergroup
+delete lost items|triggers [--host h] [--close-problems]   # only objects that discovery lost
 import template|host <file>       # without --apply: shows the diff only
 run script <name> --host <host>   # dangerous: executes code on a monitored host
 ```
