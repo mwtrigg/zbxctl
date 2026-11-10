@@ -53,3 +53,28 @@ func TestGetUsersDoesNotRequestRemovedTypeField(t *testing.T) {
 		t.Fatalf("output still requests type: %v", out)
 	}
 }
+
+// Zabbix 7.x reports availability on interfaces, not hosts.
+func TestHostAvailabilityFromInterfaces(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"host.get": `[{"hostid":"1","host":"h","name":"h","status":"0","hostgroups":[{"name":"G"}],"parentTemplates":[{"name":"T"}],
+		"interfaces":[{"ip":"10.0.0.1","port":"10050","main":"1","available":"1"},{"ip":"10.0.0.1","port":"161","main":"1","available":"2"}],
+		"macros":[{"macro":"{$S}","type":"1"}],"tags":[{"tag":"env","value":"lab"}]}]`})
+	h, err := GetHost(c, "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.AvailableState() != "2" || h.GroupNames()[0] != "G" || h.TemplateNames()[0] != "T" || h.Tags[0].Tag != "env" {
+		t.Fatalf("bad host: %+v", h)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	for _, k := range []string{"selectHostGroups", "selectParentTemplates", "selectInterfaces", "selectTags", "selectMacros"} {
+		if p[k] == nil {
+			t.Errorf("missing %s", k)
+		}
+	}
+	for _, f := range p["output"].([]any) {
+		if f == "available" {
+			t.Error("host output still requests available")
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
@@ -82,7 +83,7 @@ func printTable(columns []Column, rows []map[string]any) error {
 	for _, row := range rows {
 		r := make(table.Row, len(columns))
 		for i, c := range columns {
-			r[i] = row[c.Key]
+			r[i] = cell(row[c.Key])
 		}
 		t.AppendRow(r)
 	}
@@ -143,4 +144,15 @@ func DefaultFormat() Format {
 		return FormatTable
 	}
 	return FormatJSONL
+}
+
+// cell renders list values compactly for table output.
+func cell(v any) any {
+	if l, ok := v.([]string); ok {
+		if len(l) == 0 {
+			return "-"
+		}
+		return strings.Join(l, ",")
+	}
+	return v
 }
