@@ -17,6 +17,7 @@ var (
 	flagOutput   string
 	flagContext  string
 	flagYes      bool
+	flagApply    bool
 	flagInsecure bool
 	flagRaw      bool
 )
@@ -45,6 +46,9 @@ Single static binary. Machine-readable output. Structured errors.`,
 	SilenceErrors: true,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		output.Raw = flagRaw
+		if flagYes {
+			flagApply = true // --yes is an alias for --apply
+		}
 		output.Command = strings.TrimPrefix(cmd.CommandPath(), "zbxctl ")
 	},
 }
@@ -97,8 +101,10 @@ func init() {
 		string(output.DefaultFormat()), "output format: json|jsonl|table")
 	rootCmd.PersistentFlags().StringVarP(&flagContext, "context", "c",
 		"", "override current context")
+	rootCmd.PersistentFlags().BoolVar(&flagApply, "apply", false,
+		"execute state-changing commands (default is a dry run that changes nothing)")
 	rootCmd.PersistentFlags().BoolVarP(&flagYes, "yes", "y",
-		false, "skip confirmation prompts")
+		false, "alias for --apply; also skips the upgrade prompt")
 	rootCmd.PersistentFlags().BoolVar(&flagRaw, "raw", false,
 		"include raw API values (*_raw, *_unix) next to the readable ones")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure",

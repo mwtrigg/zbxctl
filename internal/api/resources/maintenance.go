@@ -93,10 +93,20 @@ func CreateMaintenance(c *api.Client, p CreateMaintenanceParams) (string, error)
 		params["description"] = p.Description
 	}
 	if len(p.HostIDs) > 0 {
-		params["hostids"] = p.HostIDs
+		// maintenance.create takes host objects; the old "hostids" parameter
+		// was removed from the API.
+		hosts := make([]map[string]string, len(p.HostIDs))
+		for i, id := range p.HostIDs {
+			hosts[i] = map[string]string{"hostid": id}
+		}
+		params["hosts"] = hosts
 	}
 	if len(p.GroupIDs) > 0 {
-		params["groupids"] = p.GroupIDs
+		groups := make([]map[string]string, len(p.GroupIDs))
+		for i, id := range p.GroupIDs {
+			groups[i] = map[string]string{"groupid": id}
+		}
+		params["groups"] = groups
 	}
 
 	raw, err := c.Call("maintenance.create", params)

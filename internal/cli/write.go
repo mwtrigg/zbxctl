@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -18,18 +19,19 @@ import (
 	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
-// confirm prompts the user for a yes/no confirmation unless --yes was passed.
-// Returns true if the operation should proceed.
+// confirm gates every state-changing command. Without --apply (or its alias
+// --yes) it prints what would happen, changes nothing, and returns false.
 func confirm(prompt string) bool {
-	if flagYes {
+	if flagApply {
 		return true
 	}
-	fmt.Fprintf(os.Stderr, "%s [y/N] ", prompt)
-	scanner := bufio.NewScanner(os.Stdin)
-	if scanner.Scan() {
-		resp := strings.TrimSpace(strings.ToLower(scanner.Text()))
-		return resp == "y" || resp == "yes"
+	what := strings.TrimSuffix(prompt, "?")
+	if output.Format(flagOutput) == output.FormatTable {
+		fmt.Printf("dry run: would %s (nothing changed; add --apply to execute)\n", what)
+		return false
 	}
+	b, _ := json.Marshal(map[string]any{"dry_run": true, "would": what, "applied": false, "hint": "re-run with --apply to execute"})
+	fmt.Println(string(b))
 	return false
 }
 
@@ -97,7 +99,6 @@ func runSetHostStatus(idOrName string, enable bool) error {
 	}
 
 	if !confirm(fmt.Sprintf("%s host %q (%s)?", action, h.Name, h.Host)) {
-		fmt.Fprintln(os.Stderr, "aborted")
 		return nil
 	}
 
@@ -178,7 +179,6 @@ func runSetTriggerStatus(id string, enable bool) error {
 	}
 
 	if !confirm(fmt.Sprintf("%s trigger %s %q (host: %s)?", action, t.TriggerID, t.Description, hostName)) {
-		fmt.Fprintln(os.Stderr, "aborted")
 		return nil
 	}
 
@@ -239,7 +239,6 @@ func runAcknowledge(cmd *cobra.Command, args []string) error {
 		prompt = fmt.Sprintf("acknowledge and close event %s?", eventID)
 	}
 	if !confirm(prompt) {
-		fmt.Fprintln(os.Stderr, "aborted")
 		return nil
 	}
 
@@ -356,10 +355,9 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 
 	prompt := fmt.Sprintf("create maintenance %q from %s for %d min?",
 		maintCreateName,
-		time.Unix(startTS, 0).UTC().Format("2006-01-02 15:04:05"),
+		time.Unix(startTS, 0).UTC().Format(time.RFC3339),
 		maintCreateDuration)
 	if !confirm(prompt) {
-		fmt.Fprintln(os.Stderr, "aborted")
 		return nil
 	}
 
@@ -376,8 +374,8 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 	}, []map[string]any{{
 		"maintenanceid":     id,
 		"name":              maintCreateName,
-		"active_since":      time.Unix(startTS, 0).UTC().Format("2006-01-02 15:04:05"),
-		"active_till":       time.Unix(endTS, 0).UTC().Format("2006-01-02 15:04:05"),
+		"active_since":      time.Unix(startTS, 0).UTC().Format(time.RFC3339),
+		"active_till":       time.Unix(endTS, 0).UTC().Format(time.RFC3339),
 		"active_since_unix": startTS,
 		"active_till_unix":  endTS,
 	}})
@@ -411,7 +409,6 @@ func runMaintenanceDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	if !confirm(fmt.Sprintf("delete maintenance %q (%s)?", m.Name, m.MaintenanceID)) {
-		fmt.Fprintln(os.Stderr, "aborted")
 		return nil
 	}
 
@@ -632,7 +629,6 @@ func runCreateHost(_ *cobra.Command, _ []string) error {
 	}
 
 	if !confirm(fmt.Sprintf("create host %q?", flagCreateHostName)) {
-		fmt.Fprintln(os.Stderr, "cancelled")
 		return nil
 	}
 
@@ -709,7 +705,6 @@ func runUpdateHost(_ *cobra.Command, args []string) error {
 	}
 
 	if !confirm(fmt.Sprintf("update host %q?", args[0])) {
-		fmt.Fprintln(os.Stderr, "cancelled")
 		return nil
 	}
 
@@ -745,7 +740,6 @@ func runDeleteHost(_ *cobra.Command, args []string) error {
 	}
 
 	if !confirm(fmt.Sprintf("delete host %q (id: %s)?", host.Host, host.HostID)) {
-		fmt.Fprintln(os.Stderr, "cancelled")
 		return nil
 	}
 
