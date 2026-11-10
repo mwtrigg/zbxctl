@@ -129,9 +129,10 @@ func GetLatestData(c *api.Client, f ItemFilter) ([]Item, error) {
 	if f.KeySearch != "" {
 		params["search"] = map[string]any{"key_": f.KeySearch}
 	}
-	if f.Limit > 0 {
-		params["limit"] = f.Limit
-	}
+	// Only enabled items on enabled hosts can have collected data. The limit is
+	// applied after dropping never-collected items: sending it to item.get would
+	// let items without data use up the limit and hide the ones that have values.
+	params["monitored"] = true
 
 	raw, err := c.Call("item.get", params)
 	if err != nil {
@@ -153,6 +154,9 @@ func GetLatestData(c *api.Client, f ItemFilter) ([]Item, error) {
 			item.Host = wh.Hosts[0].Host
 		}
 		out = append(out, item)
+		if f.Limit > 0 && len(out) >= f.Limit {
+			break
+		}
 	}
 	return out, nil
 }

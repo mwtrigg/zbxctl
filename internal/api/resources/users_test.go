@@ -78,3 +78,22 @@ func TestHostAvailabilityFromInterfaces(t *testing.T) {
 		}
 	}
 }
+
+// A limit must count items that have data, not items that never collected.
+func TestLatestDataLimitSkipsNeverCollected(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"item.get": `[
+		{"itemid":"1","name":"a","lastclock":"0","hosts":[{"host":"h"}]},
+		{"itemid":"2","name":"b","lastclock":"100","lastvalue":"1","hosts":[{"host":"h"}]},
+		{"itemid":"3","name":"c","lastclock":"200","lastvalue":"2","hosts":[{"host":"h"}]},
+		{"itemid":"4","name":"d","lastclock":"300","lastvalue":"3","hosts":[{"host":"h"}]}]`})
+	items, err := GetLatestData(c, ItemFilter{HostIDs: []string{"1"}, Limit: 2, WithHost: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ItemID != "2" {
+		t.Fatalf("got %+v", items)
+	}
+	if _, sent := (*calls)[0]["params"].(map[string]any)["limit"]; sent {
+		t.Fatal("limit must not be sent to item.get")
+	}
+}
