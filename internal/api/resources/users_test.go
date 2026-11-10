@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
@@ -289,5 +290,26 @@ func TestProblemClientFiltersApplyLimitAfterFiltering(t *testing.T) {
 	ms, _ := GetProblems(c, ProblemFilter{MinSeverity: -1, Maintenance: true})
 	if len(ms) != 1 || ms[0].EventID != "4" {
 		t.Fatalf("maintenance filter: %+v", ms)
+	}
+}
+
+func TestDiagnoseTriggerReasons(t *testing.T) {
+	c, _ := newFake(t, map[string]string{
+		"trigger.get": `[{"triggerid":"5","description":"d","priority":"3","status":"1","value":"1","state":"0","manual_close":"0",
+			"hosts":[{"host":"h","status":"0","maintenance_status":"0"}],"items":[{"itemid":"1","key_":"k","status":"0","state":"1","error":"no such file"}]}]`,
+		"problem.get": `[{"eventid":"9","clock":"100","acknowledged":"0","suppressed":"1","suppression_data":[{"maintenanceid":"0","suppress_until":"200"}]}]`,
+	})
+	d, err := DiagnoseTrigger(c, "5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Recoverable {
+		t.Error("a disabled trigger can never recover")
+	}
+	joined := strings.Join(d.Reasons, " | ")
+	for _, want := range []string{"trigger is disabled", "not supported", "no such file", "event 9 is suppressed until 200", "manual close is off"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in %s", want, joined)
+		}
 	}
 }

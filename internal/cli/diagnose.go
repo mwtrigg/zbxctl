@@ -260,3 +260,86 @@ func parseWindow(s string) (time.Duration, error) {
 	}
 	return time.ParseDuration(s)
 }
+
+var diagTriggerEvent bool
+
+var diagnoseTriggerCmd = &cobra.Command{
+	Use:   "trigger <trigger-id | event-id>",
+	Short: "Explain why a problem is open and whether it can recover",
+	Long: `Looks at the trigger behind a problem and reports plain-language reasons: disabled
+trigger, host or items, unsupported items, suppression or maintenance, manual close off.
+Pass a trigger ID, or an event ID with --event.
+
+Output is always JSON or JSONL (table falls back to JSON).`,
+	Args: cobra.ExactArgs(1),
+	RunE: runDiagnoseTrigger,
+}
+
+func init() {
+	diagnoseTriggerCmd.Flags().BoolVar(&diagTriggerEvent, "event", false, "the argument is an event ID; diagnose that event's trigger")
+	diagnoseCmd.AddCommand(diagnoseTriggerCmd)
+}
+
+func runDiagnoseTrigger(cmd *cobra.Command, args []string) error {
+	c, outFmt, _, err := newClient()
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if outFmt == output.FormatTable {
+		outFmt = output.FormatJSON
+	}
+	triggerID := args[0]
+	if diagTriggerEvent {
+		st, err := resources.GetEventAckState(c, args[0])
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		triggerID = st.TriggerID
+	}
+	d, err := resources.DiagnoseTrigger(c, triggerID)
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	problems := make([]map[string]any, len(d.OpenProblems))
+	for i, p := range d.OpenProblems {
+		m := map[string]any{"eventid": p.EventID, "since": fmtUnix(p.Since), "acknowledged": p.Acknowledged, "suppressed": p.Suppressed}
+		if p.Suppressed {
+			m["suppressed_until"] = suppressedUntilText(p.Until)
+			if p.Maintenance != "" {
+				m["maintenance"] = p.Maintenance
+			}
+		}
+		problems[i] = m
+	}
+	items := make([]map[string]any, len(d.Items))
+	for i, it := range d.Items {
+		items[i] = map[string]any{"itemid": it.ItemID, "key": it.Key, "enabled": it.Enabled, "supported": it.State != "1", "error": it.Error}
+	}
+	doc := map[string]any{
+		"trigger": map[string]any{
+			"triggerid": d.TriggerID, "description": d.Description, "severity": severityLabel(d.Severity), "hosts": d.Hosts,
+			"enabled": d.Enabled, "state": map[bool]string{true: "problem", false: "ok"}[d.InProblem], "manual_close": d.ManualClose,
+		},
+		"open_problems": problems,
+		"items":         items,
+		"reasons":       d.Reasons,
+		"recoverable":   d.Recoverable,
+		"meta":          map[string]any{"generated_at": time.Now().UTC().Format(time.RFC3339)},
+	}
+	if outFmt == output.FormatJSONL {
+		b, _ := json.Marshal(doc)
+		fmt.Println(string(b))
+		return nil
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(map[string]any{"data": doc})
+}
+
+func suppressedUntilText(until string) string {
+	if until == "" || until == "0" {
+		return "indefinitely"
+	}
+	return fmtUnix(until)
+}
