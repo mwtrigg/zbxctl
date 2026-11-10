@@ -409,3 +409,43 @@ func TestSecretMacroValueNeverFromCommandLine(t *testing.T) {
 		t.Fatalf("a secret on the command line must be refused: err=%v methods=%v", lastErr, methods)
 	}
 }
+
+func TestDeleteItemAndTriggerRefuseDiscoveredAndTemplated(t *testing.T) {
+	defer resetBulkFlags()
+	defer func() { extraResults = nil }()
+	for _, c := range []struct{ name, flags, method string }{
+		{"discovered item", `{"itemid":"1","hostid":"10","name":"n","key_":"k","flags":"4","templateid":"0","hosts":[{"host":"web1"}]}`, "item.delete"},
+		{"templated item", `{"itemid":"1","hostid":"10","name":"n","key_":"k","flags":"0","templateid":"77","hosts":[{"host":"web1"}]}`, "item.delete"},
+	} {
+		extraResults = map[string]string{"item.get": "[" + c.flags + "]", "item.delete": `{"itemids":["1"]}`}
+		_, methods := runCLI(t, "delete", "item", "1", "--apply", "--no-verify", "--state-dir", t.TempDir())
+		if lastErr == nil || slices.Contains(methods, c.method) {
+			t.Errorf("%s must be refused: err=%v methods=%v", c.name, lastErr, methods)
+		}
+	}
+	extraResults = map[string]string{"trigger.get": `[{"triggerid":"5","description":"d","expression":"x","priority":"3","status":"0","flags":"4","templateid":"0","hosts":[{"host":"web1"}]}]`, "trigger.delete": `{"triggerids":["5"]}`}
+	_, methods := runCLI(t, "delete", "trigger", "5", "--apply", "--no-verify", "--state-dir", t.TempDir())
+	if lastErr == nil || slices.Contains(methods, "trigger.delete") {
+		t.Errorf("discovered trigger must be refused: err=%v", lastErr)
+	}
+	extraResults["trigger.get"] = `[{"triggerid":"5","description":"d","expression":"x","priority":"3","status":"0","flags":"0","templateid":"0","hosts":[{"host":"web1"}]}]`
+	_, methods = runCLI(t, "delete", "trigger", "5", "--apply", "--no-verify", "--state-dir", t.TempDir())
+	if lastErr != nil || !slices.Contains(methods, "trigger.delete") {
+		t.Errorf("a plain trigger may be deleted: err=%v methods=%v", lastErr, methods)
+	}
+}
+
+func TestCreateItemNeedsDelayAndKnownType(t *testing.T) {
+	defer func() {
+		extraResults = nil
+		itHost, itName, itKey, itType, itValueType, itDelay = "", "", "", "agent", "float", ""
+	}()
+	_, methods := runCLI(t, "create", "item", "--host", "web1", "--name", "n", "--key", "k", "--type", "bogus", "--apply")
+	if lastErr == nil || slices.Contains(methods, "item.create") {
+		t.Fatalf("bad type: %v", lastErr)
+	}
+	_, methods = runCLI(t, "create", "item", "--host", "web1", "--name", "n", "--key", "k", "--type", "agent", "--apply")
+	if lastErr == nil || slices.Contains(methods, "item.create") {
+		t.Fatalf("agent item without --delay: %v", lastErr)
+	}
+}
