@@ -51,6 +51,25 @@ zbxctl state prune --older-than 90d [--apply]                  # a dry run until
 
 Nothing is deleted automatically, and `state prune` only ever touches files zbxctl wrote. These commands read local files and need no Zabbix connection.
 
+### Undoing a change by hand
+
+There is deliberately no automatic `restore`: too much can go subtly wrong. The file tells you (or an agent) what to do instead. Find the file with `state list`, read it with `state show`, then run the inverse command:
+
+| Change | What the file holds | Undo |
+|---|---|---|
+| `enable` / `disable host`, `trigger` | the status before | the opposite command on the same target |
+| `acknowledge` / `unacknowledge` | whether it was acknowledged and closed | the opposite verb (a closed problem cannot be reopened) |
+| `suppress` / `unsuppress` | the event | the opposite verb (an earlier suppression time is not recorded) |
+| `maintenance extend` / `shorten` | the end time before | `maintenance extend\|shorten --until <the old end>` |
+| `maintenance delete` | name, start, end, hosts, groups | `maintenance create` with those values |
+| `delete host` | groups, templates, tags, interfaces, macros (secret values are never saved) | `create host`, then `update host` and `set macro`; history is gone |
+| `delete template` | the full yaml export | `import template <file> --apply` after saving `export_yaml` to a file |
+| `import template\|host` | the previous yaml export of every object it changed | import that yaml again (objects the import created are not recorded) |
+| `delete group`, `item`, `trigger`, `macro`, `user` | the object's fields | the matching `create`/`set` command with those fields |
+| `delete lost items\|triggers` | what was deleted | nothing to restore: discovery recreates them if the object comes back |
+
+Always do the undo as a dry run first and check it against the file.
+
 ## Escape hatch
 
 `zbxctl api call <method> --params '{...}'` calls any Zabbix API method and prints the raw result, for the long tail that has no command. Reads (`*.get`, `configuration.export`, ...) run directly; every other method is a dry run until `--apply`, needs the write tier and saves an audit record with secrets masked. `user.login`, `token.generate`, `script.execute` and similar are refused. Prefer a dedicated command whenever one exists: it gives flat results, dry runs and checks.
