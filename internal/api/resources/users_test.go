@@ -458,3 +458,19 @@ func TestUpdateHostProxyParams(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditLogParams(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"auditlog.get": `[{"auditid":"a","clock":"100","username":"u","ip":"1.2.3.4","action":"2","resourcetype":"4","resourceid":"9","resourcename":"web1","details":""}]`})
+	es, err := GetAuditLog(c, AuditQuery{Users: []string{"u"}, ActionCodes: []string{"2"}, ResourceCodes: []string{"4"}, From: 50, Search: "web", Limit: 10})
+	if err != nil || len(es) != 1 || es[0].ResourceName != "web1" {
+		t.Fatalf("es=%+v err=%v", es, err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	f := p["filter"].(map[string]any)
+	if f["username"] == nil || f["action"] == nil || f["resourcetype"] == nil || p["time_from"].(float64) != 50 || p["limit"].(float64) != 10 {
+		t.Fatalf("bad params: %v", p)
+	}
+	if p["sortfield"] != "clock" || p["sortorder"] != "DESC" {
+		t.Fatalf("must be newest first: %v", p)
+	}
+}
