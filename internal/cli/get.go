@@ -267,9 +267,11 @@ func runGetHosts(cmd *cobra.Command, args []string) error {
 			"name":          h.Name,
 			"status":        hostStatusLabel(h.Status),
 			"status_raw":    h.Status,
-			"available":     availableLabel(h.Available),
-			"available_raw": h.Available,
+			"available":     availableLabel(h.AvailableState()),
+			"available_raw": h.AvailableState(),
 			"description":   h.Description,
+			"groups":        h.GroupNames(),
+			"templates":     h.TemplateNames(),
 		}
 	}
 	return output.Print(outFmt, cols, rows)
@@ -307,7 +309,33 @@ func runGetHost(cmd *cobra.Command, args []string) error {
 		{Key: "name", Header: "NAME"},
 		{Key: "status", Header: "STATUS"},
 		{Key: "available", Header: "AVAILABLE"},
+		{Key: "groups", Header: "GROUPS"},
+		{Key: "templates", Header: "TEMPLATES"},
 		{Key: "description", Header: "DESCRIPTION"},
+	}
+	ifaces := make([]string, 0, len(h.Interfaces))
+	for _, i := range h.Interfaces {
+		addr := i.IP
+		if addr == "" {
+			addr = i.DNS
+		}
+		ifaces = append(ifaces, addr+":"+i.Port)
+	}
+	tags := make([]string, 0, len(h.Tags))
+	for _, t := range h.Tags {
+		if t.Value != "" {
+			tags = append(tags, t.Tag+"="+t.Value)
+		} else {
+			tags = append(tags, t.Tag)
+		}
+	}
+	macros := make([]string, 0, len(h.Macros))
+	for _, m := range h.Macros {
+		if m.Type == "1" { // secret: the API returns no value, never show one
+			macros = append(macros, m.Macro+"=******")
+		} else {
+			macros = append(macros, m.Macro+"="+m.Value)
+		}
 	}
 	row := map[string]any{
 		"hostid":        h.HostID,
@@ -315,9 +343,14 @@ func runGetHost(cmd *cobra.Command, args []string) error {
 		"name":          h.Name,
 		"status":        hostStatusLabel(h.Status),
 		"status_raw":    h.Status,
-		"available":     availableLabel(h.Available),
-		"available_raw": h.Available,
+		"available":     availableLabel(h.AvailableState()),
+		"available_raw": h.AvailableState(),
 		"description":   h.Description,
+		"groups":        h.GroupNames(),
+		"templates":     h.TemplateNames(),
+		"interfaces":    ifaces,
+		"tags":          tags,
+		"macros":        macros,
 	}
 	return output.Print(outFmt, cols, []map[string]any{row})
 }

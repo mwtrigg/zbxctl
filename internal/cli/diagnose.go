@@ -154,7 +154,7 @@ func runDiagnoseHost(cmd *cobra.Command, args []string) error {
 		"host":            hostObj.Host,
 		"name":            hostObj.Name,
 		"status":          hostStatusLabel(hostObj.Status),
-		"available":       availableLabel(hostObj.Available),
+		"available":       availableLabel(hostObj.AvailableState()),
 		"iface_available": ifaceAvail,
 	}
 
