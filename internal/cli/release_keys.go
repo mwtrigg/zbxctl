@@ -7,4 +7,7 @@ package cli
 //
 // The matching private key is the ZBXCTL_SIGNING_KEY secret of the release
 // workflow; it signs checksums.txt (ssh-keygen -Y sign -n zbxctl-release).
-var releaseKeys = []string{}
+var releaseKeys = []string{
+	// release signing key, fingerprint SHA256:NRZYwmLfDrQSJnscVQ89vYFY5ue7QDmtuFBF+AuAGok
+	"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINeRNwS8kq7Kffh6LN3n5V/6PrldHkeuCz4V6UZ18b2A zbxctl signing",
+}
