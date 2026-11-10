@@ -15,6 +15,9 @@ import (
 	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
+// extraResults overrides the fake server answer for a method in the next runCLI.
+var extraResults map[string]string
+
 // lastErr is the error from the most recent runCLI.
 var lastErr error
 
@@ -31,6 +34,9 @@ func runCLI(t *testing.T, args ...string) (string, []string) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		methods = append(methods, req.Method)
 		res := "[]"
+		if r, ok := extraResults[req.Method]; ok {
+			res = r
+		}
 		switch req.Method {
 		case "host.get":
 			st := "0"
@@ -45,6 +51,9 @@ func runCLI(t *testing.T, args ...string) (string, []string) {
 			res = `[{"eventid":"5","name":"E","acknowledged":"0","r_eventid":"0","objectid":"7"}]`
 		case "trigger.get":
 			res = `[{"triggerid":"7","manual_close":"1"}]`
+		}
+		if r, ok := extraResults[req.Method]; ok {
+			res = r
 		}
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + res + `,"id":1}`))
 	}))
@@ -217,5 +226,31 @@ func TestDryRunWritesNoStateFile(t *testing.T) {
 	runCLI(t, "disable", "host", "web1", "--state-dir", dir)
 	if files, _ := filepath.Glob(dir + "/*.json"); len(files) != 0 {
 		t.Fatalf("dry run wrote %v", files)
+	}
+}
+
+const lostItemJSON = `[
+	{"itemid":"100","name":"Lost fs /data","key_":"vfs.fs.size[/data,free]","hostid":"10","hosts":[{"hostid":"10","host":"web1"}],"itemDiscovery":{"status":"1","lastcheck":"1000","ts_delete":"5000","parent_itemid":"900"}},
+	{"itemid":"101","name":"Live fs /","key_":"vfs.fs.size[/,free]","hostid":"10","hosts":[{"hostid":"10","host":"web1"}],"itemDiscovery":{"status":"0","lastcheck":"2000","ts_delete":"0","parent_itemid":"900"}}]`
+
+func TestDeleteLostOnlyDeletesLostItems(t *testing.T) {
+	defer resetBulkFlags()
+	extraResults = map[string]string{"item.get": lostItemJSON, "itemprototype.get": `[{"itemid":"900","discoveryRule":{"itemid":"50"}}]`, "item.delete": `{"itemids":["100"]}`}
+	defer func() { extraResults = nil; discHosts, discGroups = nil, nil }()
+
+	_, methods := runCLI(t, "delete", "lost", "items", "--host", "web1", "--apply", "--no-verify", "--state-dir", t.TempDir())
+	if lastErr != nil || !slices.Contains(methods, "item.delete") {
+		t.Fatalf("err=%v methods=%v", lastErr, methods)
+	}
+
+	_, methods = runCLI(t, "delete", "lost", "items", "101", "--apply", "--no-verify", "--state-dir", t.TempDir())
+	if lastErr == nil || slices.Contains(methods, "item.delete") {
+		t.Fatalf("a live discovered item must be refused: err=%v methods=%v", lastErr, methods)
+	}
+
+	discHosts, discGroups = nil, nil // package-level flag values persist between runs in one process
+	_, methods = runCLI(t, "delete", "lost", "items")
+	if lastErr == nil || slices.Contains(methods, "item.delete") {
+		t.Fatalf("no scope must be refused: err=%v", lastErr)
 	}
 }

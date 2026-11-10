@@ -386,3 +386,25 @@ func TestGetTrendsOnlyNumericItems(t *testing.T) {
 		t.Fatalf("text item must not be queried for trends: %v", ids)
 	}
 }
+
+func TestGetLostAndRuleCounts(t *testing.T) {
+	c, _ := newFake(t, map[string]string{
+		"item.get":             `[{"itemid":"100","name":"a","key_":"k1","hostid":"10","hosts":[{"hostid":"10","host":"h"}],"itemDiscovery":{"status":"1","lastcheck":"1","ts_delete":"9","parent_itemid":"900"}},{"itemid":"101","name":"b","key_":"k2","hostid":"10","hosts":[{"hostid":"10","host":"h"}],"itemDiscovery":{"status":"0","parent_itemid":"900"}}]`,
+		"itemprototype.get":    `[{"itemid":"900","discoveryRule":{"itemid":"50"}}]`,
+		"trigger.get":          `[]`,
+		"triggerprototype.get": `[]`,
+		"discoveryrule.get":    `[{"itemid":"50","hostid":"10","name":"FS","key_":"vfs.fs.discovery","status":"0","state":"0","error":"","delay":"1h","items":"2","triggers":"1","hosts":[{"host":"h"}]}]`,
+	})
+	rules, err := GetDiscoveryRules(c, nil)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("rules=%+v err=%v", rules, err)
+	}
+	r := rules[0]
+	if r.LostItems != 1 || r.ItemPrototypes != 2 || r.TriggerPrototypes != 1 || !r.Enabled {
+		t.Fatalf("bad rule: %+v", r)
+	}
+	lost, _ := GetLost(c, "item", nil, nil)
+	if len(lost) != 1 || lost[0].ID != "100" || lost[0].RuleID != "50" || lost[0].DeletesAt != "9" {
+		t.Fatalf("lost: %+v", lost)
+	}
+}
