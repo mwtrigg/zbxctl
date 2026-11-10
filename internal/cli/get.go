@@ -857,6 +857,7 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 		return cliFail(outFmt, err)
 	}
 	if getProblemsGroupBy == "name" {
+		output.Fetched = len(problems) // the limit applied to problems, not to the groups printed
 		return printProblemGroups(outFmt, problems)
 	}
 

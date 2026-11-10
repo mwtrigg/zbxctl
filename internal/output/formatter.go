@@ -39,7 +39,18 @@ var Command string
 // has that many rows the output says so, since there may be more.
 var Limit int
 
-func limitReached(rows []map[string]any) bool { return Limit > 0 && len(rows) >= Limit }
+// Fetched is the number of rows the API returned, when that is not the number of rows
+// printed (grouped output prints groups, not the rows that were limited). 0 = use the
+// printed rows.
+var Fetched int
+
+func limitReached(rows []map[string]any) bool {
+	n := len(rows)
+	if Fetched > 0 {
+		n = Fetched
+	}
+	return Limit > 0 && n >= Limit
+}
 
 // KindFor maps an exit code to a stable machine-readable error kind.
 func KindFor(code int) string {

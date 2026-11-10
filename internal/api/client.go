@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mwtrigg/zbxctl/internal/config"
@@ -58,6 +59,7 @@ type Client struct {
 	httpClient  *http.Client
 	endpoint    string
 	bearerToken string // pre-auth header token (api_token or session token)
+	session     bool   // bearerToken is a session from user.login, not an API token
 
 	// Version is the server's version: pinned by the api_version setting, or
 	// detected with apiinfo.version. VersionSource says which ("pinned" or "detected").
@@ -137,8 +139,31 @@ func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 	if err := json.Unmarshal(raw, &token); err != nil {
 		return nil, fmt.Errorf("user.login response: %w", err)
 	}
-	c.bearerToken = token
+	c.bearerToken, c.session = token, true
+	sessionsMu.Lock()
+	sessions = append(sessions, c)
+	sessionsMu.Unlock()
 	return c, nil
+}
+
+var (
+	sessionsMu sync.Mutex
+	sessions   []*Client
+)
+
+// CloseSessions logs out of every session this process created with user.login, so a
+// password-authenticated run does not leave a live session behind until it expires.
+// Failures are ignored: the session expires on its own.
+func CloseSessions() {
+	sessionsMu.Lock()
+	list := sessions
+	sessions = nil
+	sessionsMu.Unlock()
+	for _, c := range list {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _ = c.callRaw(ctx, "user.logout", []string{})
+		cancel()
+	}
 }
 
 // Call invokes a Zabbix API method with the given params.
@@ -167,7 +192,7 @@ func (c *Client) CallList(method string, params map[string]any) (json.RawMessage
 // user.checkAuthentication to be called without an Authorization header.
 func (c *Client) CurrentUser() (userID, username string, err error) {
 	tmp := &Client{httpClient: c.httpClient, endpoint: c.endpoint}
-	raw, err := tmp.callRaw(context.Background(), "user.checkAuthentication", map[string]any{"token": c.bearerToken})
+	raw, err := tmp.callRaw(context.Background(), "user.checkAuthentication", map[string]any{map[bool]string{true: "sessionid", false: "token"}[c.session]: c.bearerToken})
 	if err != nil {
 		return "", "", err
 	}

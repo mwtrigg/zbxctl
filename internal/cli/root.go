@@ -60,7 +60,7 @@ Single static binary. Machine-readable output. Structured errors.`,
 			return err
 		}
 		output.Raw = flagRaw
-		output.Limit = 0
+		output.Limit, output.Fetched = 0, 0
 		api.Timeout, api.Retries = flagTimeout, flagRetries
 		if err := setDisplayZone(flagTZ); err != nil {
 			fmt.Fprintln(os.Stderr, "warning:", err)
@@ -167,6 +167,7 @@ func cliFail(outFmt output.Format, err error) error {
 
 // Execute runs the root command and returns an exit code.
 func Execute() int {
+	defer api.CloseSessions() // log out of sessions created by password login
 	if err := rootCmd.Execute(); err != nil {
 		var ce *cliErr
 		if errors.As(err, &ce) {

@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
+
+func jsonMarshal(v any) ([]byte, error) { return json.Marshal(v) }
 
 func hostJSON(name, desc, monitoredBy, proxyID string) string {
 	return `[{"hostid":"10","host":"web1","name":"` + name + `","status":"0","description":"` + desc + `","monitored_by":"` + monitoredBy + `","proxyid":"` + proxyID + `","proxy_groupid":"0",
@@ -179,5 +185,75 @@ func TestDeleteHostIsNotConfusedByAHostNamedLikeItsID(t *testing.T) {
 	}
 	if _, err := runFake(t, f, "delete", "host", "web-01", "--apply"); err != nil || !deleted {
 		t.Fatalf("delete host must send the delete and verify it by ID: err=%v deleted=%v", err, deleted)
+	}
+}
+
+// N4: the record's outcomes are what an agent needs after an exit 7.
+func TestStateShowAndListDisplayOutcomes(t *testing.T) {
+	dir := t.TempDir()
+	b, _ := jsonMarshal(map[string]any{"command": "delete-host", "time": "2026-11-10T10:00:00Z", "items": []map[string]any{
+		{"target": "1", "action": "a", "before": map[string]any{}, "status": "applied"},
+		{"target": "2", "action": "b", "before": map[string]any{}, "status": "unknown", "error": "gateway error HTTP 504"},
+		{"target": "3", "action": "c", "before": map[string]any{}, "status": "failed"},
+	}})
+	_ = writeTestFile(dir+"/delete-host-x.json", string(b))
+	out, err := runFake(t, &fakeZabbix{}, "state", "show", "delete-host-x.json", "--state-dir", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"status": "applied"`, `"status": "unknown"`, `"status": "failed"`, "gateway error HTTP 504"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("state show lacks %s:\n%s", want, out)
+		}
+	}
+	out, err = runFake(t, &fakeZabbix{}, "state", "list", "--state-dir", dir)
+	if err != nil || !strings.Contains(out, "1 applied, 1 failed, 1 unknown") || !strings.Contains(out, `"unresolved": true`) {
+		t.Fatalf("state list must summarise the outcomes: %v\n%s", err, out)
+	}
+}
+
+// N6: the limit is about the problems fetched, not the groups printed.
+func TestGroupedProblemsStillSayTheLimitWasReached(t *testing.T) {
+	f := &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		if c.Method != "problem.get" {
+			return fakeReply{}
+		}
+		var ps []string
+		for i := 0; i < 100; i++ {
+			ps = append(ps, fmt.Sprintf(`{"eventid":"%d","objectid":"7","name":"Disk full","severity":"4","clock":"1700000000","r_eventid":"0","acknowledged":"0","suppressed":"0"}`, i))
+		}
+		return fakeReply{Result: "[" + strings.Join(ps, ",") + "]"}
+	}}
+	out, err := runFake(t, f, "get", "problems", "--group-by", "name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"limit_reached": true`) {
+		t.Fatalf("100 problems fetched at limit 100 must say so even though one group is printed:\n%s", out)
+	}
+}
+
+// M9 / L5: a password session is logged out, and the current-user check uses sessionid.
+func TestPasswordSessionsAreLoggedOutAndUseSessionID(t *testing.T) {
+	f := &fakeZabbix{PasswordLogin: true, After: api.CloseSessions, Handler: func(c rpcCall) fakeReply {
+		switch c.Method {
+		case "user.login":
+			return fakeReply{Result: `"sess123"`}
+		case "user.checkAuthentication":
+			return fakeReply{Result: `{"userid":"7","username":"u"}`}
+		case "user.get":
+			return fakeReply{Result: `[{"role":{"name":"User role","type":"1"}}]`}
+		}
+		return fakeReply{}
+	}}
+	if _, err := runFake(t, f, "auth", "check"); err != nil {
+		t.Fatal(err)
+	}
+	auth := f.called("user.checkAuthentication")
+	if len(auth) != 1 || auth[0].Params["sessionid"] != "sess123" || auth[0].Params["token"] != nil {
+		t.Fatalf("a session must be checked with sessionid: %v", auth)
+	}
+	if len(f.called("user.logout")) != 1 {
+		t.Fatalf("the session must be logged out: %v", f.Calls)
 	}
 }

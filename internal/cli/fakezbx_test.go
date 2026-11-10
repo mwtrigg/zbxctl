@@ -38,6 +38,10 @@ type fakeZabbix struct {
 	// DefaultTier leaves the permission tier unset, so the connection gets the default
 	// (readonly). Otherwise the tests run with ZBXCTL_PERMISSIONS=write.
 	DefaultTier bool
+	// PasswordLogin authenticates with a username and password (user.login) instead of a token.
+	PasswordLogin bool
+	// After runs once the command has finished, while the server is still up.
+	After func()
 }
 
 func (f *fakeZabbix) called(method string) []rpcCall {
@@ -91,7 +95,13 @@ func runFake(t *testing.T, f *fakeZabbix, args ...string) (string, error) {
 	}))
 	defer srv.Close()
 	t.Setenv("ZBXCTL_URL", srv.URL)
-	t.Setenv("ZBXCTL_API_TOKEN", "test-token")
+	if f.PasswordLogin {
+		t.Setenv("ZBXCTL_API_TOKEN", "")
+		t.Setenv("ZBXCTL_USERNAME", "u")
+		t.Setenv("ZBXCTL_PASSWORD", "p")
+	} else {
+		t.Setenv("ZBXCTL_API_TOKEN", "test-token")
+	}
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -118,6 +128,9 @@ func runFake(t *testing.T, f *fakeZabbix, args ...string) (string, error) {
 	os.Stdout = w
 	rootCmd.SetArgs(args)
 	err := rootCmd.Execute()
+	if f.After != nil {
+		f.After()
+	}
 	_ = w.Close()
 	os.Stdout = old
 	var buf bytes.Buffer

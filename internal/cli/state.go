@@ -79,6 +79,8 @@ type stateFile struct {
 	// Unresolved is true when a target is still pending or unknown: the run was
 	// cut off or its outcome was lost, so the file is the only record of it.
 	Unresolved bool
+	// Outcomes counts the targets by outcome: applied, failed, unknown, sent, pending.
+	Outcomes map[string]int
 }
 
 // readStateFiles lists the before-state files in dir, newest first. Files that
@@ -111,8 +113,14 @@ func readStateFiles(dir string) ([]stateFile, error) {
 		}
 		t, _ := time.Parse(time.RFC3339, doc.Time)
 		sf := stateFile{Path: path, Name: e.Name(), Time: t, Command: doc.Command, Items: len(doc.Items), Size: int64(len(b))}
+		sf.Outcomes = map[string]int{}
 		for _, it := range doc.Items {
-			if st, _ := it["status"].(string); st == statePending || st == stateUnknown || st == stateSent {
+			st, _ := it["status"].(string)
+			if st == "" {
+				st = "recorded" // a file from before outcomes were recorded
+			}
+			sf.Outcomes[st]++
+			if st == statePending || st == stateUnknown || st == stateSent {
 				sf.Unresolved = true
 			}
 			if a, ok := it["action"].(string); ok && len(sf.Actions) < 3 {
@@ -132,10 +140,22 @@ func readStateFiles(dir string) ([]stateFile, error) {
 	return out, nil
 }
 
+// outcomeSummary reads like "2 applied, 1 unknown".
+func outcomeSummary(o map[string]int) string {
+	var parts []string
+	for _, st := range []string{stateApplied, stateFailed, stateUnknown, stateSent, statePending, "recorded"} {
+		if n := o[st]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, st))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 func stateRows(files []stateFile) []map[string]any {
 	rows := make([]map[string]any, len(files))
 	for i, f := range files {
 		rows[i] = map[string]any{
+			"outcomes": outcomeSummary(f.Outcomes), "unresolved": f.Unresolved,
 			"file": f.Name, "time": f.Time.In(displayLoc).Format(time.RFC3339), "command": f.Command,
 			"targets": f.Items, "first_actions": f.Actions, "bytes": f.Size, "path": f.Path,
 		}
@@ -144,7 +164,7 @@ func stateRows(files []stateFile) []map[string]any {
 }
 
 var stateCols = []output.Column{
-	{Key: "time", Header: "TIME"}, {Key: "command", Header: "COMMAND"}, {Key: "targets", Header: "TARGETS"}, {Key: "file", Header: "FILE"},
+	{Key: "time", Header: "TIME"}, {Key: "command", Header: "COMMAND"}, {Key: "outcomes", Header: "OUTCOMES"}, {Key: "targets", Header: "TARGETS"}, {Key: "file", Header: "FILE"},
 }
 
 func filterStateFiles(files []stateFile, command string, olderThan time.Duration) []stateFile {
@@ -217,9 +237,9 @@ func init() {
 			}
 			rows := make([]map[string]any, len(doc.Items))
 			for i, it := range doc.Items {
-				rows[i] = map[string]any{"target": it["target"], "action": it["action"], "before": it["before"], "command": doc.Command, "time": doc.Time}
+				rows[i] = map[string]any{"target": it["target"], "action": it["action"], "status": it["status"], "error": it["error"], "before": it["before"], "command": doc.Command, "time": doc.Time}
 			}
-			return output.Print(outFmt, []output.Column{{Key: "target", Header: "TARGET"}, {Key: "action", Header: "ACTION"}}, rows)
+			return output.Print(outFmt, []output.Column{{Key: "target", Header: "TARGET"}, {Key: "status", Header: "STATUS"}, {Key: "action", Header: "ACTION"}}, rows)
 		},
 	}
 
