@@ -146,3 +146,28 @@ func TestAcknowledgeActionMasks(t *testing.T) {
 		}
 	}
 }
+
+func TestHostTagMerging(t *testing.T) {
+	cur := []HostTag{{"env", "prod"}, {"env", "lab"}, {"team", "x"}}
+	if _, changed := HostTagsAfterAdd(cur, "env", "prod"); changed {
+		t.Error("duplicate add should be a no-op")
+	}
+	out, changed := HostTagsAfterAdd(cur, "tier", "1")
+	if !changed || len(out) != 4 || len(cur) != 3 {
+		t.Errorf("add: %v changed=%v (input mutated? %v)", out, changed, cur)
+	}
+	if out, n := HostTagsAfterRemove(cur, "env", nil); n != 2 || len(out) != 1 {
+		t.Errorf("remove all by name: %v %d", out, n)
+	}
+	v := "lab"
+	if out, n := HostTagsAfterRemove(cur, "env", &v); n != 1 || len(out) != 2 {
+		t.Errorf("remove pair: %v %d", out, n)
+	}
+	c, calls := newFake(t, map[string]string{"host.update": `{"hostids":["1"]}`})
+	if err := SetHostTags(c, "1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if tags, ok := (*calls)[0]["params"].(map[string]any)["tags"].([]any); !ok || len(tags) != 0 {
+		t.Errorf("empty tag list must encode as []: %v", (*calls)[0]["params"])
+	}
+}
