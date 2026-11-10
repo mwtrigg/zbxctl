@@ -76,6 +76,18 @@ Always do the undo as a dry run first and check it against the file.
 
 See [docs/api-coverage.md](docs/api-coverage.md) for what is and is not covered of the Zabbix API.
 
+## Zabbix versions
+
+zbxctl supports Zabbix **7.4 and newer**. It asks the server for its version (no login needed) and adapts; a server older than 7.4 is refused with exit code 6 (`--allow-unsupported` or `ZBXCTL_ALLOW_UNSUPPORTED=1` tries anyway), and one newer than the newest version zbxctl has been tested against (7.4) works but prints a warning. To skip the detection call, or to say which version a context talks to, pin it in the config:
+
+```yaml
+contexts:
+  lab:
+    api_version: "7.4"      # or "8.0"; empty = detect
+```
+
+`ZBXCTL_API_VERSION` overrides the file. `zbxctl auth status` shows the detected and pinned versions and whether the server is supported.
+
 ## Output and connection options
 
 `--timeout` (default 180s) bounds each API request, `--retries` (default 2) repeats read-only calls after a connection error or a 502/503/504 (writes are never retried), and `--tz America/New_York` (or `ZBXCTL_TZ`, or `local`) renders times in that zone with an explicit offset instead of UTC.
@@ -100,6 +112,7 @@ Errors go to stderr as `{"error": "...", "kind": "...", "code": N}`.
 | 3 | `auth` | token or login refused |
 | 4 | `connection` | cannot reach Zabbix |
 | 5 | `usage` | invalid flag or argument |
+| 6 | `unsupported_version` | the Zabbix server is older than 7.4 |
 
 ## Commands
 
