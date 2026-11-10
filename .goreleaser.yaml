@@ -1,0 +1,52 @@
+# GoReleaser configuration: `goreleaser release --clean` on a pushed v* tag builds the
+# archives, checksums and SBOMs. Archive names are fixed (zbxctl_<os>_<arch>) because
+# `zbxctl upgrade` looks them up by name; change them only together with
+# internal/cli/upgrade_install.go.
+version: 2
+project_name: zbxctl
+
+builds:
+  - id: zbxctl
+    main: ./cmd/zbxctl
+    binary: zbxctl
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/mwtrigg/zbxctl/internal/version.Version={{ .Version }}
+
+archives:
+  - id: zbxctl
+    name_template: "zbxctl_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # The license and the third-party notices travel with every binary.
+    files:
+      - LICENSE
+      - THIRD_PARTY_NOTICES.md
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+# A software bill of materials (SPDX) for each archive; needs syft on PATH.
+sboms:
+  - id: archive-sboms
+    artifacts: archive
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  prerelease: auto

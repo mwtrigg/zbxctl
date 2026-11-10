@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Cross-compile every release platform
+        run: |
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -o /dev/null ./cmd/zbxctl
+            done
+          done
+      - name: go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+      - name: THIRD_PARTY_NOTICES.md is up to date
+        run: go run scripts/notices/main.go | diff -u THIRD_PARTY_NOTICES.md -
+
+  vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
