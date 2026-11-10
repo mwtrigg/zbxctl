@@ -66,6 +66,7 @@ func init() {
 		im.Flags().IntVar(&bulkExpect, "expect", -1, "refuse to run unless exactly N files are found")
 		im.Flags().StringVar(&bulkStateDir, "state-dir", "", "where the before-state file is written (default ~/.local/state/zbxctl)")
 		im.Flags().BoolVar(&bulkNoState, "no-state", false, "do not save the current state of what the import changes")
+		im.Flags().IntVar(&bulkKeep, "state-keep", -1, "keep at most this many before-state files (default 200; 0 keeps all)")
 		importCmd.AddCommand(im)
 
 		df := &cobra.Command{

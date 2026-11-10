@@ -37,6 +37,21 @@ type Context struct {
 
 	BeforeState *bool  `yaml:"before_state"`
 	StateDir    string `yaml:"state_dir"`
+
+	// StateKeep is how many before-state files to keep; older ones are deleted
+	// as new ones are written. nil means DefaultStateKeep; 0 means keep everything.
+	StateKeep *int `yaml:"state_keep"`
+}
+
+// DefaultStateKeep is how many before-state files are kept unless configured.
+const DefaultStateKeep = 200
+
+// KeepStates is the number of before-state files to keep (0 = all of them).
+func (c *Context) KeepStates() int {
+	if c.StateKeep == nil || *c.StateKeep < 0 {
+		return DefaultStateKeep
+	}
+	return *c.StateKeep
 }
 
 // SaveBeforeState reports whether before-state files should be written.
@@ -164,6 +179,11 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	if v := os.Getenv("ZBXCTL_BEFORE_STATE"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			ctx.BeforeState = &b
+		}
+	}
+	if v := os.Getenv("ZBXCTL_STATE_KEEP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			ctx.StateKeep = &n
 		}
 	}
 	if v := os.Getenv("ZBXCTL_STATE_DIR"); v != "" {

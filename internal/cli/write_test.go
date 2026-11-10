@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/mwtrigg/zbxctl/internal/config"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -186,6 +188,7 @@ func TestAcknowledgeSuppressAppliesWithUntil(t *testing.T) {
 
 func resetBulkFlags() {
 	bulkIDFile, bulkExpect, bulkStateDir, bulkNoState, bulkNoVerify = "", -1, "", false, false
+	bulkKeep, stateKeep, stateKeepFlag = -1, config.DefaultStateKeep, -1
 }
 
 func TestBulkExpectGuardRefusesBeforeChangingAnything(t *testing.T) {
@@ -684,4 +687,119 @@ func exitCodeOf(err error) int {
 		return ce.code
 	}
 	return classify(err)
+}
+
+func countStateFiles(t *testing.T, dir string) []stateFile {
+	t.Helper()
+	fs, err := readStateFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fs
+}
+
+func TestWriteStateKeepsOnlyTheNewestN(t *testing.T) {
+	defer resetBulkFlags()
+	dir := t.TempDir()
+	for i := 1; i <= 5; i++ { // five older files, oldest first
+		writeStateFixture(t, dir, fmt.Sprintf("f%d.json", i), "disable-host", time.Duration(10-i)*time.Hour, 1)
+	}
+	os.WriteFile(filepath.Join(dir, "notes.json"), []byte(`{"not":"ours"}`), 0o600)
+	bulkStateDir, stateKeep = dir, 3
+
+	path, err := writeState("disable-host", []*step{{Key: "1", Desc: "do it", Before: map[string]any{"x": 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	left := countStateFiles(t, dir)
+	if len(left) != 3 {
+		t.Fatalf("kept %d, want 3: %+v", len(left), left)
+	}
+	names := map[string]bool{}
+	for _, f := range left {
+		names[f.Path] = true
+	}
+	if !names[path] {
+		t.Fatal("the file just written must never be pruned")
+	}
+	if !names[filepath.Join(dir, "f5.json")] || !names[filepath.Join(dir, "f4.json")] || names[filepath.Join(dir, "f1.json")] {
+		t.Fatalf("the newest files must survive and the oldest go: %v", names)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notes.json")); err != nil {
+		t.Fatal("a file that is not a zbxctl before-state file must never be touched")
+	}
+}
+
+func TestStateKeepZeroKeepsEverything(t *testing.T) {
+	defer resetBulkFlags()
+	dir := t.TempDir()
+	for i := 1; i <= 4; i++ {
+		writeStateFixture(t, dir, fmt.Sprintf("f%d.json", i), "disable-host", time.Duration(10-i)*time.Hour, 1)
+	}
+	bulkStateDir, stateKeep = dir, 0
+	if _, err := writeState("disable-host", []*step{{Key: "1", Desc: "d", Before: map[string]any{}}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(countStateFiles(t, dir)); n != 5 {
+		t.Fatalf("state_keep 0 must keep all: %d", n)
+	}
+}
+
+func TestStateKeepFromFlagEnvAndDefault(t *testing.T) {
+	defer resetBulkFlags()
+	seed := func(dir string) {
+		for i := 1; i <= 4; i++ {
+			writeStateFixture(t, dir, fmt.Sprintf("f%d.json", i), "disable-host", time.Duration(10-i)*time.Hour, 1)
+		}
+	}
+	// the flag
+	d1 := t.TempDir()
+	seed(d1)
+	runCLI(t, "disable", "host", "web1", "--apply", "--state-dir", d1, "--state-keep", "2")
+	if lastErr != nil || len(countStateFiles(t, d1)) != 2 {
+		t.Fatalf("--state-keep 2: err=%v files=%d", lastErr, len(countStateFiles(t, d1)))
+	}
+	// the environment, and the flag beats it
+	resetBulkFlags()
+	d2 := t.TempDir()
+	seed(d2)
+	t.Setenv("ZBXCTL_STATE_KEEP", "3")
+	runCLI(t, "disable", "host", "web1", "--apply", "--state-dir", d2)
+	if lastErr != nil || len(countStateFiles(t, d2)) != 3 {
+		t.Fatalf("ZBXCTL_STATE_KEEP=3: err=%v files=%d", lastErr, len(countStateFiles(t, d2)))
+	}
+	resetBulkFlags()
+	d3 := t.TempDir()
+	seed(d3)
+	runCLI(t, "disable", "host", "web1", "--apply", "--state-dir", d3, "--state-keep", "0")
+	if lastErr != nil || len(countStateFiles(t, d3)) != 5 {
+		t.Fatalf("the flag must beat the environment: files=%d", len(countStateFiles(t, d3)))
+	}
+	// the default is 200
+	resetBulkFlags()
+	t.Setenv("ZBXCTL_STATE_KEEP", "")
+	d4 := t.TempDir()
+	seed(d4)
+	runCLI(t, "disable", "host", "web1", "--apply", "--state-dir", d4)
+	if lastErr != nil || stateKeep != 200 || len(countStateFiles(t, d4)) != 5 {
+		t.Fatalf("default keep is 200: keep=%d files=%d", stateKeep, len(countStateFiles(t, d4)))
+	}
+}
+
+func TestStatePruneKeep(t *testing.T) {
+	defer func() { resetBulkFlags(); stateDirFlag, stateOlderThan = "", "" }()
+	dir := t.TempDir()
+	for i := 1; i <= 5; i++ {
+		writeStateFixture(t, dir, fmt.Sprintf("f%d.json", i), "disable-host", time.Duration(10-i)*time.Hour, 1)
+	}
+	runCLI(t, "state", "prune", "--state-dir", dir, "--keep", "2")
+	if lastErr != nil || len(countStateFiles(t, dir)) != 5 {
+		t.Fatalf("a dry run must delete nothing: err=%v", lastErr)
+	}
+	resetBulkFlags()
+	runCLI(t, "state", "prune", "--state-dir", dir, "--keep", "2", "--apply")
+	left := countStateFiles(t, dir)
+	if lastErr != nil || len(left) != 2 || left[0].Name != "f5.json" || left[1].Name != "f4.json" {
+		t.Fatalf("--keep 2 keeps the newest two: err=%v left=%+v", lastErr, left)
+	}
 }

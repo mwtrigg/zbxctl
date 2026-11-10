@@ -15,6 +15,7 @@ contexts:
     allowed_scripts: []     # names or IDs `run script` may execute; empty = blocked
     before_state: true      # save a before-state file for bulk writes under --apply (default true)
     state_dir: ""           # where they go; empty = ~/.local/state/zbxctl
+    state_keep: 200         # keep this many, delete older ones as new are written; 0 = keep all
 
   staging:
     url: https://zabbix-staging.example.com

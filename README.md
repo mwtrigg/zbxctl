@@ -88,9 +88,10 @@ Every change made with `--apply` saves a before-state file under `~/.local/state
 zbxctl state list --command delete-host     # newest first
 zbxctl state show delete-host-20261110T031907Z.json
 zbxctl state prune --older-than 90d         # a dry run until --apply
+zbxctl state prune --keep 50                # or: keep only the newest 50
 ```
 
-There is deliberately no automatic restore: too much can go subtly wrong (a deleted host's history is gone, secret values are never saved, a closed problem cannot be reopened). The table below says how to reverse each kind of change by hand. Turn the files off with `before_state: false` in the config, `ZBXCTL_BEFORE_STATE=false` or `--no-state`; `state_dir` / `ZBXCTL_STATE_DIR` / `--state-dir` choose where they go. Nothing is ever deleted automatically.
+There is deliberately no automatic restore: too much can go subtly wrong (a deleted host's history is gone, secret values are never saved, a closed problem cannot be reopened). The table below says how to reverse each kind of change by hand. Turn the files off with `before_state: false` in the config, `ZBXCTL_BEFORE_STATE=false` or `--no-state`; `state_dir` / `ZBXCTL_STATE_DIR` / `--state-dir` choose where they go. zbxctl keeps the newest **200** files and deletes older ones as new ones are written (it says so on stderr when it does); change that with `state_keep` in the config, `ZBXCTL_STATE_KEEP` or `--state-keep`, and use `0` to keep everything. Only files zbxctl wrote are ever touched.
 
 | Change | What the file holds | Undo |
 |---|---|---|
@@ -223,6 +224,7 @@ contexts:
     allowed_scripts: []             # what `run script` may execute; empty = blocked
     before_state: true              # audit files for changes made with --apply
     state_dir: ""                   # empty = ~/.local/state/zbxctl
+    state_keep: 200                 # keep this many audit files, delete older ones; 0 = keep all
 ```
 
 Priority for every setting: command-line flag, then environment variable, then the config file, then the default.
@@ -233,7 +235,7 @@ Priority for every setting: command-line flag, then environment variable, then t
 | `ZBXCTL_CONTEXT` | which context to use |
 | `ZBXCTL_INSECURE`, `ZBXCTL_CA_FILE` | TLS (`--insecure` always prints a warning) |
 | `ZBXCTL_API_VERSION` | pin the Zabbix version |
-| `ZBXCTL_BEFORE_STATE`, `ZBXCTL_STATE_DIR` | the before-state files |
+| `ZBXCTL_BEFORE_STATE`, `ZBXCTL_STATE_DIR`, `ZBXCTL_STATE_KEEP` | the before-state files: on or off, where, how many to keep |
 | `ZBXCTL_TZ` | the time zone times are shown in (default UTC) |
 | `ZBXCTL_ALLOW_UNSUPPORTED` | try a Zabbix server older than 7.4 |
 

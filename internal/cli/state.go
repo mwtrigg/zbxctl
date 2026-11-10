@@ -24,6 +24,7 @@ var (
 	stateOlderThan  string
 	stateLimit      int
 	stateShowFilter string
+	stateKeepFlag   = -1
 )
 
 var stateCmd = &cobra.Command{
@@ -35,10 +36,12 @@ ZBXCTL_BEFORE_STATE=false or --no-state. Together they are an audit trail of wha
 
   zbxctl state list                    the files, newest first
   zbxctl state show <file>             what one file recorded
-  zbxctl state prune --older-than 30d  delete old files (a dry run until --apply)
+  zbxctl state prune --older-than 30d  delete old files (a dry run until --apply); --keep N keeps the newest N
 
 The directory is --state-dir, else ZBXCTL_STATE_DIR, else state_dir in the config, else
-~/.local/state/zbxctl. Nothing is ever deleted automatically.`,
+~/.local/state/zbxctl. Only the newest 200 files are kept (state_keep in the config,
+ZBXCTL_STATE_KEEP or --state-keep; 0 keeps everything); older ones are deleted as new ones are
+written, and zbxctl says so when it does.`,
 }
 
 // resolveStateDir finds the directory without needing a Zabbix connection.
@@ -210,12 +213,16 @@ func init() {
 		Use: "prune", Short: "Delete old before-state files (a dry run unless --apply)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outFmt := output.Format(flagOutput)
-			if stateOlderThan == "" {
-				return cliPrintErr(outFmt, "say how old: --older-than 30d (nothing is deleted without it)", output.ExitUsage)
+			if stateOlderThan == "" && stateKeepFlag < 0 {
+				return cliPrintErr(outFmt, "say what to delete: --older-than 30d and/or --keep 200 (nothing is deleted without one)", output.ExitUsage)
 			}
-			older, err := parseWindow(stateOlderThan)
-			if err != nil || older <= 0 {
-				return cliPrintErr(outFmt, fmt.Sprintf("invalid --older-than %q: use a duration like 30d", stateOlderThan), output.ExitUsage)
+			var older time.Duration
+			if stateOlderThan != "" {
+				var err error
+				older, err = parseWindow(stateOlderThan)
+				if err != nil || older <= 0 {
+					return cliPrintErr(outFmt, fmt.Sprintf("invalid --older-than %q: use a duration like 30d", stateOlderThan), output.ExitUsage)
+				}
 			}
 			dir, err := resolveStateDir()
 			if err != nil {
@@ -226,6 +233,27 @@ func init() {
 				return cliFail(outFmt, err)
 			}
 			victims := filterStateFiles(all, stateCommand, older)
+			if stateKeepFlag >= 0 { // --keep N: also everything beyond the newest N
+				beyond := map[string]bool{}
+				if len(all) > stateKeepFlag {
+					for _, f := range all[stateKeepFlag:] {
+						beyond[f.Path] = true
+					}
+				}
+				if stateOlderThan == "" {
+					victims = nil
+				}
+				seen := map[string]bool{}
+				for _, v := range victims {
+					seen[v.Path] = true
+				}
+				for _, f := range all {
+					if beyond[f.Path] && !seen[f.Path] && (stateCommand == "" || f.Command == stateCommand) {
+						victims = append(victims, f)
+					}
+				}
+				sort.SliceStable(victims, func(i, j int) bool { return victims[i].Time.After(victims[j].Time) })
+			}
 			if bulkExpect >= 0 && len(victims) != bulkExpect {
 				return cliFail(outFmt, &usageError{fmt.Sprintf("--expect %d but %d file(s) match; nothing was deleted", bulkExpect, len(victims))})
 			}
@@ -234,7 +262,14 @@ func init() {
 				r["deleted"] = false
 			}
 			if !flagApply {
-				fmt.Fprintf(os.Stderr, "dry run: %d of %d file(s) in %s are older than %s; add --apply to delete them\n", len(victims), len(all), dir, stateOlderThan)
+				var why []string
+				if stateOlderThan != "" {
+					why = append(why, "older than "+stateOlderThan)
+				}
+				if stateKeepFlag >= 0 {
+					why = append(why, fmt.Sprintf("beyond the newest %d", stateKeepFlag))
+				}
+				fmt.Fprintf(os.Stderr, "dry run: %d of %d file(s) in %s are %s; add --apply to delete them\n", len(victims), len(all), dir, strings.Join(why, " or "))
 				return output.Print(outFmt, append(append([]output.Column{}, stateCols...), output.Column{Key: "deleted", Header: "DELETED"}), rows)
 			}
 			for i, v := range victims {
@@ -247,7 +282,8 @@ func init() {
 			return output.Print(outFmt, append(append([]output.Column{}, stateCols...), output.Column{Key: "deleted", Header: "DELETED"}), rows)
 		},
 	}
-	prune.Flags().StringVar(&stateOlderThan, "older-than", "", "delete files older than this, e.g. 30d (required)")
+	prune.Flags().StringVar(&stateOlderThan, "older-than", "", "delete files older than this, e.g. 30d")
+	prune.Flags().IntVar(&stateKeepFlag, "keep", -1, "delete everything beyond the newest N files")
 	prune.Flags().StringVar(&stateCommand, "command", "", "only files written by this command")
 	prune.Flags().IntVar(&bulkExpect, "expect", -1, "refuse to delete unless exactly N files match")
 

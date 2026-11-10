@@ -71,3 +71,38 @@ func TestBeforeStateSettingDefaultsOnAndEnvOverridesFile(t *testing.T) {
 		t.Fatalf("the environment must override the file: %+v", ctx)
 	}
 }
+
+func TestStateKeepDefaultsToTwoHundredAndEnvOverridesFile(t *testing.T) {
+	if (&Context{}).KeepStates() != 200 || DefaultStateKeep != 200 {
+		t.Fatal("the default is 200")
+	}
+	zero, fifty := 0, 50
+	if (&Context{StateKeep: &zero}).KeepStates() != 0 || (&Context{StateKeep: &fifty}).KeepStates() != 50 {
+		t.Fatal("explicit values must be used, 0 meaning keep everything")
+	}
+	neg := -3
+	if (&Context{StateKeep: &neg}).KeepStates() != 200 {
+		t.Fatal("a negative value falls back to the default")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := home + "/.config/zbxctl"
+	os.MkdirAll(dir, 0o700)
+	os.WriteFile(dir+"/config.yaml", []byte("current_context: lab\ncontexts:\n  lab:\n    url: http://z\n    api_token: x\n    state_keep: 25\n"), 0o600)
+	t.Setenv("ZBXCTL_STATE_KEEP", "")
+	_, ctx, err := LoadConfig("")
+	if err != nil || ctx.KeepStates() != 25 {
+		t.Fatalf("file: %v %v", ctx, err)
+	}
+	t.Setenv("ZBXCTL_STATE_KEEP", "7")
+	_, ctx, _ = LoadConfig("")
+	if ctx.KeepStates() != 7 {
+		t.Fatalf("the environment must override the file: %d", ctx.KeepStates())
+	}
+	t.Setenv("ZBXCTL_STATE_KEEP", "banana")
+	_, ctx, _ = LoadConfig("")
+	if ctx.KeepStates() != 25 {
+		t.Fatalf("an unreadable value must be ignored: %d", ctx.KeepStates())
+	}
+}
