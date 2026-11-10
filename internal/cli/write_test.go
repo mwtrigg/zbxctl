@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mwtrigg/zbxctl/internal/output"
 )
@@ -252,5 +254,64 @@ func TestDeleteLostOnlyDeletesLostItems(t *testing.T) {
 	_, methods = runCLI(t, "delete", "lost", "items")
 	if lastErr == nil || slices.Contains(methods, "item.delete") {
 		t.Fatalf("no scope must be refused: err=%v", lastErr)
+	}
+}
+
+func TestDeleteTemplateRefusesLinkedUnlessAllowed(t *testing.T) {
+	defer resetBulkFlags()
+	defer func() { extraResults = nil; tplAllowLinked = false }()
+	extraResults = map[string]string{
+		"template.get":         `[{"templateid":"7","host":"tpl","name":"Tpl","hosts":[{"host":"web1"}],"templates":[]}]`,
+		"configuration.export": `"zabbix_export: yaml"`,
+		"template.delete":      `{"templateids":["7"]}`,
+	}
+	_, methods := runCLI(t, "delete", "template", "tpl", "--apply", "--no-verify", "--state-dir", t.TempDir())
+	if lastErr == nil || slices.Contains(methods, "template.delete") {
+		t.Fatalf("a linked template must be refused: err=%v methods=%v", lastErr, methods)
+	}
+	dir := t.TempDir()
+	_, methods = runCLI(t, "delete", "template", "tpl", "--allow-linked", "--apply", "--no-verify", "--state-dir", dir)
+	if lastErr != nil || !slices.Contains(methods, "template.delete") {
+		t.Fatalf("--allow-linked: err=%v methods=%v", lastErr, methods)
+	}
+	files, _ := filepath.Glob(dir + "/delete-template-*.json")
+	if len(files) != 1 {
+		t.Fatalf("state files: %v", files)
+	}
+	if b, _ := os.ReadFile(files[0]); !strings.Contains(string(b), "export_yaml") {
+		t.Fatalf("before-state must keep the export: %s", b)
+	}
+}
+
+func TestBacktestJudgesFiresAgainstRealProblems(t *testing.T) {
+	defer func() { extraResults = nil; btHosts, btRealProblem, btSummary = nil, "", false }()
+	now := time.Now().Unix()
+	var hist []string
+	for i := 0; i < 30; i++ { // one sample a minute; 95 between minutes 10 and 15, otherwise 20
+		v := "20"
+		if i >= 10 && i < 15 {
+			v = "95"
+		}
+		hist = append(hist, `{"itemid":"1","clock":"`+strconv.FormatInt(now-int64(30-i)*60, 10)+`","ns":"0","value":"`+v+`"}`)
+	}
+	start := now - int64(20)*60 // the real problem began 10 minutes after the fire
+	extraResults = map[string]string{
+		"item.get":    `[{"itemid":"1","hostid":"10","key_":"m","value_type":"0","hosts":[{"hostid":"10","host":"web1"}]}]`,
+		"history.get": "[" + strings.Join(hist, ",") + "]",
+		"event.get":   `[{"eventid":"9","clock":"` + strconv.FormatInt(start+600, 10) + `","r_eventid":"0","name":"M high","hosts":[{"hostid":"10"}]}]`,
+	}
+	out, _ := runCLI(t, "backtest", "--host", "web1", "--item", "m", "--when", "last>90", "--since", "2h", "--real-problem", "M high", "--summary")
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+	var env struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &env); err != nil || len(env.Data) != 1 {
+		t.Fatalf("out=%q err=%v", out, err)
+	}
+	r := env.Data[0]
+	if r["fires"].(float64) != 1 || r["true_alerts"].(float64) != 1 || r["false_alarms"].(float64) != 0 || r["missed"].(float64) != 0 {
+		t.Fatalf("summary %v", r)
 	}
 }
