@@ -10,8 +10,8 @@ import (
 // Template represents a Zabbix template.
 type Template struct {
 	TemplateID  string `json:"templateid"`
-	Host        string `json:"host"`        // technical name
-	Name        string `json:"name"`        // visible name
+	Host        string `json:"host"` // technical name
+	Name        string `json:"name"` // visible name
 	Description string `json:"description"`
 	Items       string `json:"items"`    // count (string from API)
 	Triggers    string `json:"triggers"` // count

@@ -16,9 +16,9 @@ type Item struct {
 	Key       string `json:"key_"`
 	Type      string `json:"type"`
 	ValueType string `json:"value_type"`
-	Status    string `json:"status"`    // "0"=enabled, "1"=disabled
-	State     string `json:"state"`     // "0"=normal, "1"=not_supported
-	Error     string `json:"error"`     // non-empty when state=1
+	Status    string `json:"status"` // "0"=enabled, "1"=disabled
+	State     string `json:"state"`  // "0"=normal, "1"=not_supported
+	Error     string `json:"error"`  // non-empty when state=1
 	LastValue string `json:"lastvalue"`
 	LastClock string `json:"lastclock"` // Unix timestamp string; "0" = never collected
 	Units     string `json:"units"`

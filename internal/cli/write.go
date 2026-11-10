@@ -374,10 +374,10 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 		{Key: "active_since", Header: "START"},
 		{Key: "active_till", Header: "END"},
 	}, []map[string]any{{
-		"maintenanceid": id,
-		"name":          maintCreateName,
-		"active_since":  time.Unix(startTS, 0).UTC().Format("2006-01-02 15:04:05"),
-		"active_till":   time.Unix(endTS, 0).UTC().Format("2006-01-02 15:04:05"),
+		"maintenanceid":     id,
+		"name":              maintCreateName,
+		"active_since":      time.Unix(startTS, 0).UTC().Format("2006-01-02 15:04:05"),
+		"active_till":       time.Unix(endTS, 0).UTC().Format("2006-01-02 15:04:05"),
 		"active_since_unix": startTS,
 		"active_till_unix":  endTS,
 	}})

@@ -164,20 +164,6 @@ func guiAccessLabel(s string) string {
 	}
 }
 
-// userTypeLabel converts a Zabbix user type code.
-func userTypeLabel(s string) string {
-	switch s {
-	case "1":
-		return "user"
-	case "2":
-		return "admin"
-	case "3":
-		return "super_admin"
-	default:
-		return s
-	}
-}
-
 // acknowledgedLabel converts "0"/"1" acknowledged field.
 func acknowledgedLabel(s string) string {
 	switch s {
@@ -276,14 +262,14 @@ func runGetHosts(cmd *cobra.Command, args []string) error {
 	rows := make([]map[string]any, len(hosts))
 	for i, h := range hosts {
 		rows[i] = map[string]any{
-			"hostid":      h.HostID,
-			"host":        h.Host,
-			"name":        h.Name,
-			"status":      hostStatusLabel(h.Status),
-			"status_raw":  h.Status,
-			"available":   availableLabel(h.Available),
+			"hostid":        h.HostID,
+			"host":          h.Host,
+			"name":          h.Name,
+			"status":        hostStatusLabel(h.Status),
+			"status_raw":    h.Status,
+			"available":     availableLabel(h.Available),
 			"available_raw": h.Available,
-			"description": h.Description,
+			"description":   h.Description,
 		}
 	}
 	return output.Print(outFmt, cols, rows)
@@ -447,10 +433,10 @@ func runGetItems(cmd *cobra.Command, args []string) error {
 // ── get latestdata [<host>] ───────────────────────────────────────────────────
 
 var (
-	getLatestDataLimit    int
-	flagLatestdataHosts   []string
-	flagLatestdataGroups  []string
-	flagLatestdataItem    string
+	getLatestDataLimit   int
+	flagLatestdataHosts  []string
+	flagLatestdataGroups []string
+	flagLatestdataItem   string
 )
 
 var getLatestDataCmd = &cobra.Command{
@@ -857,17 +843,17 @@ func runGetEvents(cmd *cobra.Command, args []string) error {
 			hostName = ev.Hosts[0].Host
 		}
 		rows[i] = map[string]any{
-			"eventid":      ev.EventID,
-			"objectid":     ev.ObjectID,
-			"host":         hostName,
-			"name":         ev.Name,
-			"value":        triggerValueLabel(ev.Value),
-			"value_raw":    ev.Value,
-			"acknowledged": acknowledgedLabel(ev.Acknowledged),
+			"eventid":          ev.EventID,
+			"objectid":         ev.ObjectID,
+			"host":             hostName,
+			"name":             ev.Name,
+			"value":            triggerValueLabel(ev.Value),
+			"value_raw":        ev.Value,
+			"acknowledged":     acknowledgedLabel(ev.Acknowledged),
 			"acknowledged_raw": ev.Acknowledged,
-			"clock":        fmtUnix(ev.Clock),
-			"clock_unix":   ev.Clock,
-			"hosts":        ev.Hosts,
+			"clock":            fmtUnix(ev.Clock),
+			"clock_unix":       ev.Clock,
+			"hosts":            ev.Hosts,
 		}
 	}
 	return output.Print(outFmt, cols, rows)
@@ -1052,7 +1038,7 @@ func runGetUsers(cmd *cobra.Command, args []string) error {
 		{Key: "username", Header: "USERNAME"},
 		{Key: "name", Header: "NAME"},
 		{Key: "surname", Header: "SURNAME"},
-		{Key: "type", Header: "TYPE"},
+		{Key: "role", Header: "ROLE"},
 	}
 	rows := make([]map[string]any, len(users))
 	for i, u := range users {
@@ -1062,8 +1048,7 @@ func runGetUsers(cmd *cobra.Command, args []string) error {
 			"name":     u.Name,
 			"surname":  u.Surname,
 			"roleid":   u.RoleID,
-			"type":     userTypeLabel(u.Type),
-			"type_raw": u.Type,
+			"role":     u.Role.Name,
 		}
 	}
 	return output.Print(outFmt, cols, rows)
@@ -1100,7 +1085,7 @@ func runGetUser(cmd *cobra.Command, args []string) error {
 		{Key: "username", Header: "USERNAME"},
 		{Key: "name", Header: "NAME"},
 		{Key: "surname", Header: "SURNAME"},
-		{Key: "type", Header: "TYPE"},
+		{Key: "role", Header: "ROLE"},
 		{Key: "roleid", Header: "ROLE_ID"},
 	}
 	row := map[string]any{
@@ -1109,8 +1094,7 @@ func runGetUser(cmd *cobra.Command, args []string) error {
 		"name":     u.Name,
 		"surname":  u.Surname,
 		"roleid":   u.RoleID,
-		"type":     userTypeLabel(u.Type),
-		"type_raw": u.Type,
+		"role":     u.Role.Name,
 	}
 	return output.Print(outFmt, cols, []map[string]any{row})
 }

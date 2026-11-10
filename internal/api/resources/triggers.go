@@ -17,10 +17,10 @@ type TriggerHost struct {
 type Trigger struct {
 	TriggerID   string        `json:"triggerid"`
 	Description string        `json:"description"`
-	Priority    string        `json:"priority"`    // 0–5
-	Status      string        `json:"status"`      // "0"=enabled, "1"=disabled
-	Value       string        `json:"value"`       // "0"=OK, "1"=PROBLEM
-	LastChange  string        `json:"lastchange"`  // Unix timestamp
+	Priority    string        `json:"priority"`   // 0–5
+	Status      string        `json:"status"`     // "0"=enabled, "1"=disabled
+	Value       string        `json:"value"`      // "0"=OK, "1"=PROBLEM
+	LastChange  string        `json:"lastchange"` // Unix timestamp
 	Hosts       []TriggerHost `json:"hosts"`
 }
 

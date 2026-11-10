@@ -12,10 +12,10 @@ import (
 // Host represents a Zabbix host object.
 type Host struct {
 	HostID      string `json:"hostid"`
-	Host        string `json:"host"`        // technical name
-	Name        string `json:"name"`        // visible name
-	Status      string `json:"status"`      // "0"=monitored, "1"=unmonitored
-	Available   string `json:"available"`   // "0"=unknown, "1"=available, "2"=unavailable
+	Host        string `json:"host"`      // technical name
+	Name        string `json:"name"`      // visible name
+	Status      string `json:"status"`    // "0"=monitored, "1"=unmonitored
+	Available   string `json:"available"` // "0"=unknown, "1"=available, "2"=unavailable
 	Description string `json:"description"`
 }
 
@@ -214,8 +214,8 @@ func ResolveHostNames(c *api.Client, hostIDs []string) (map[string]string, error
 
 // InterfaceInput describes a host interface for create/update operations.
 type InterfaceInput struct {
-	Type          int    // 1=agent, 2=snmp, 3=ipmi, 4=jmx
-	UseIP         int    // 1=IP, 0=DNS
+	Type          int // 1=agent, 2=snmp, 3=ipmi, 4=jmx
+	UseIP         int // 1=IP, 0=DNS
 	IP            string
 	DNS           string
 	Port          string
