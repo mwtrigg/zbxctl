@@ -82,7 +82,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           version: "v2.19.0"
-          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
+          args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Build the tag that was pushed. Without this GoReleaser takes the highest tag on the
@@ -92,6 +92,13 @@ jobs:
       - name: Remove the signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/zbxctl_signing_key"
+      # GoReleaser's own notes are disabled (they would be commit subjects), and it ignores
+      # --release-notes when the changelog is disabled, so the body is set from CHANGELOG.md here.
+      - name: Set the release notes from CHANGELOG.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"
       - name: Attest build provenance (public repositories)
         if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2

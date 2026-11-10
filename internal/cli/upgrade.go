@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,9 @@ type githubAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
+
+// errNoRelease means GitHub has no latest (non-prerelease) release for the project.
+var errNoRelease = errors.New("no release found")
 
 var upgradeCheckOnly bool
 
@@ -72,14 +76,26 @@ func runUpgrade(_ *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
+	current := version.Version
 	rel, err := fetchLatestRelease(ctx)
+	if errors.Is(err, errNoRelease) {
+		// GitHub's "latest release" ignores prereleases, so with only a release candidate
+		// published there is nothing to find. That is not a failure.
+		const note = "no final release has been published yet (prereleases are not considered), so there is nothing to upgrade to"
+		if outFmt == output.FormatTable {
+			fmt.Printf("%s (%s)\n", note, current)
+			return nil
+		}
+		return output.Print(outFmt, []output.Column{{Key: "current_version", Header: "CURRENT"}, {Key: "latest_version", Header: "LATEST"}, {Key: "update_available", Header: "UPDATE_AVAILABLE"}, {Key: "note", Header: "NOTE"}},
+			[]map[string]any{{"current_version": current, "latest_version": "", "update_available": false, "note": note}})
+	}
 	if err != nil {
 		return cliPrintErr(outFmt, "failed to fetch release info: "+err.Error(), output.ExitError)
 	}
 
-	current := version.Version
 	latest := rel.TagName
-	updateAvailable := stripV(current) != stripV(latest)
+	// an update is a different version that is not older than the one running
+	updateAvailable := stripV(current) != stripV(latest) && !olderRelease(current, latest)
 
 	if upgradeCheckOnly || !updateAvailable {
 		if outFmt == output.FormatTable {
@@ -159,6 +175,9 @@ func fetchLatestRelease(ctx context.Context) (*githubRelease, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errNoRelease
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned %s", resp.Status)
 	}

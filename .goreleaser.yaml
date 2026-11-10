@@ -59,8 +59,10 @@ sboms:
   - id: archive-sboms
     artifacts: archive
 
-# The release notes come from CHANGELOG.md (scripts/release-notes.sh, passed with
-# --release-notes), never from commit subjects, which can name internal things.
+# GoReleaser's own notes are commit subjects, which can name internal things, so they are
+# disabled. (GoReleaser also ignores --release-notes when the changelog is disabled.) The
+# release workflow sets the release body from CHANGELOG.md after publishing, with
+# scripts/release-notes.sh and gh release edit.
 changelog:
   disable: true
 

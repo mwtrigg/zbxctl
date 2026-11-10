@@ -22,6 +22,9 @@ func TestReleaseWorkflowKeepsItsGuards(t *testing.T) {
 		`git merge-base --is-ancestor "$GITHUB_SHA" origin/main`,
 		"environment: release",
 		"needs: verify",
+		// GoReleaser ignores --release-notes while its changelog is disabled, so the body is
+		// set from CHANGELOG.md after publishing (rc.1 shipped with an empty body without this)
+		`gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/release-notes.md"`,
 	} {
 		if !strings.Contains(w, want) {
 			t.Errorf("release.yml lost %q", want)

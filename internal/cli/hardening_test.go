@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/mwtrigg/zbxctl/internal/api/resources"
+	"github.com/mwtrigg/zbxctl/internal/version"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -711,5 +712,44 @@ func TestAuthStatusReportsTheContextInUse(t *testing.T) {
 	out, err := runFake(t, f, "auth", "status")
 	if err != nil || !strings.Contains(out, `"context": "t"`) {
 		t.Fatalf("auth status must name the active context: %v\n%s", err, out)
+	}
+}
+
+// With only a release candidate published GitHub has no "latest" release: that is not an error.
+func TestUpgradeCheckWithNoFinalReleaseIsNotAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
+	defer srv.Close()
+	old := githubReleaseAPI
+	githubReleaseAPI = srv.URL
+	defer func() { githubReleaseAPI = old }()
+	out, err := runFake(t, &fakeZabbix{}, "upgrade", "--check")
+	if err != nil || !strings.Contains(out, `"update_available": false`) || !strings.Contains(out, "no final release") {
+		t.Fatalf("a 404 from the latest-release lookup must read as 'nothing to upgrade to': %v\n%s", err, out)
+	}
+}
+
+func TestUpgradeCheckNeverCallsAnOlderReleaseAnUpdate(t *testing.T) {
+	check := func(current, tag string) string {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"tag_name":"` + tag + `","assets":[]}`))
+		}))
+		defer srv.Close()
+		oldAPI, oldVer := githubReleaseAPI, version.Version
+		githubReleaseAPI, version.Version = srv.URL, current
+		defer func() { githubReleaseAPI, version.Version = oldAPI, oldVer }()
+		out, err := runFake(t, &fakeZabbix{}, "upgrade", "--check")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if out := check("0.1.1", "v0.1.0"); !strings.Contains(out, `"update_available": false`) {
+		t.Fatalf("0.1.0 is not an update to 0.1.1: %s", out)
+	}
+	if out := check("0.1.0-rc.1", "v0.1.0"); !strings.Contains(out, `"update_available": true`) {
+		t.Fatalf("v0.1.0 is an update to its own rc.1: %s", out)
+	}
+	if out := check("0.1.0", "v0.1.0"); !strings.Contains(out, `"update_available": false`) {
+		t.Fatalf("the same version is not an update: %s", out)
 	}
 }
