@@ -39,11 +39,11 @@ ssh-keygen -Y verify -f allowed_signers -I zbxctl-release -n zbxctl-release \
 sha256sum --check --ignore-missing checksums.txt
 ```
 
-Release files also carry GitHub build-provenance attestations, so `gh attestation verify zbxctl_linux_amd64.tar.gz --repo mwtrigg/zbxctl` proves which workflow and commit built them.
+Release files also carry GitHub build-provenance attestations, so `gh attestation verify zbxctl_<version>_linux_amd64.tar.gz --repo mwtrigg/zbxctl` proves which workflow and commit built them.
 
 ### Updating
 
-`zbxctl upgrade --check` says whether a newer release exists. `zbxctl upgrade` downloads it and installs it only if the signature on `checksums.txt` is valid for the release key built into your copy and the archive matches its checksum. It downloads only from this project's release page, never installs an older version than the one running, and keeps the previous binary as `zbxctl.old`. If anything cannot be verified it installs nothing.
+`zbxctl upgrade --check` says whether a newer release exists. `zbxctl upgrade` downloads it and installs it only if the signature on `checksums.txt` is valid for the release key built into your copy and the archive matches its checksum. It downloads only from this project's release page, never installs an older version than the one running (the version is part of the signed archive name, so an old release cannot be passed off as a new one), and keeps the previous binary as `zbxctl.old`. If anything cannot be verified it installs nothing.
 
 ## Quick start
 

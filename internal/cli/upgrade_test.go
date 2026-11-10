@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/mwtrigg/zbxctl/internal/sshsig"
+	"github.com/mwtrigg/zbxctl/internal/version"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -53,7 +54,7 @@ func makeZip(t *testing.T, files map[string]string) []byte {
 func sha(b []byte) string { s := sha256.Sum256(b); return hex.EncodeToString(s[:]) }
 
 func TestArchiveNamesMatchWhatTheReleaseProduces(t *testing.T) {
-	if archiveName("linux", "amd64") != "zbxctl_linux_amd64.tar.gz" || archiveName("darwin", "arm64") != "zbxctl_darwin_arm64.tar.gz" || archiveName("windows", "amd64") != "zbxctl_windows_amd64.zip" {
+	if archiveName("v0.2.0", "linux", "amd64") != "zbxctl_0.2.0_linux_amd64.tar.gz" || archiveName("0.2.0", "darwin", "arm64") != "zbxctl_0.2.0_darwin_arm64.tar.gz" || archiveName("v0.2.0", "windows", "amd64") != "zbxctl_0.2.0_windows_amd64.zip" {
 		t.Fatal("archive names changed: .goreleaser.yaml must change with them")
 	}
 	if binaryName("windows") != "zbxctl.exe" || binaryName("linux") != "zbxctl" {
@@ -107,7 +108,7 @@ type releaseFixture struct {
 
 func newReleaseFixture(t *testing.T) *releaseFixture {
 	t.Helper()
-	name := archiveName(runtime.GOOS, runtime.GOARCH)
+	name := archiveName("v9.0.0", runtime.GOOS, runtime.GOARCH)
 	var archive []byte
 	if runtime.GOOS == "windows" {
 		archive = makeZip(t, map[string]string{binaryName(runtime.GOOS): "NEWBINARY"})
@@ -123,7 +124,7 @@ func newReleaseFixture(t *testing.T) *releaseFixture {
 	oldPrefix, oldKeys := releaseURLPrefix, releaseKeys
 	releaseURLPrefix, releaseKeys = srv.URL+"/", []string{f.pubLine}
 	t.Cleanup(func() { releaseURLPrefix, releaseKeys = oldPrefix, oldKeys })
-	f.rel = &githubRelease{TagName: "v9", Assets: []githubAsset{
+	f.rel = &githubRelease{TagName: "v9.0.0", Assets: []githubAsset{
 		{Name: name, BrowserDownloadURL: srv.URL + "/archive"},
 		{Name: "checksums.txt", BrowserDownloadURL: srv.URL + "/sums"},
 		{Name: "checksums.txt.sig", BrowserDownloadURL: srv.URL + "/sig"},
@@ -153,7 +154,7 @@ func TestInstallLatestVerifiesSignatureAndChecksumBeforeInstalling(t *testing.T)
 	f.body["/archive"] = good
 
 	// checksums.txt replaced (an attacker also fixes the hash) but the signature no longer matches
-	evil := []byte(fmt.Sprintf("%s  %s\n", sha([]byte("evil")), archiveName(runtime.GOOS, runtime.GOARCH)))
+	evil := []byte(fmt.Sprintf("%s  %s\n", sha([]byte("evil")), archiveName("v9.0.0", runtime.GOOS, runtime.GOARCH)))
 	goodSums := f.body["/sums"]
 	f.body["/sums"] = evil
 	if err := try(f.rel); err == nil || installed != "" || !strings.Contains(err.Error(), "signed") {
@@ -174,12 +175,36 @@ func TestInstallLatestVerifiesSignatureAndChecksumBeforeInstalling(t *testing.T)
 	f.body["/sig"] = sshsig.SignEd25519(f.priv, goodSums, signatureNamespace)
 
 	// missing pieces
-	if err := try(&githubRelease{TagName: "v9", Assets: f.rel.Assets[:2]}); err == nil || installed != "" || !strings.Contains(err.Error(), "signed checksums") {
+	if err := try(&githubRelease{TagName: "v9.0.0", Assets: f.rel.Assets[:2]}); err == nil || installed != "" || !strings.Contains(err.Error(), "signed checksums") {
 		t.Fatalf("a release without a signature must not be installed: err=%v", err)
 	}
-	if err := try(&githubRelease{TagName: "v9", Assets: f.rel.Assets[1:]}); err == nil || installed != "" {
+	if err := try(&githubRelease{TagName: "v9.0.0", Assets: f.rel.Assets[1:]}); err == nil || installed != "" {
 		t.Fatalf("no asset for this platform: err=%v", err)
 	}
+
+	// a replayed old release: validly signed checksums for version 0.1.0 under a v99 tag
+	oldName := archiveName("v0.1.0", runtime.GOOS, runtime.GOARCH)
+	replaySums := []byte(fmt.Sprintf("%s  %s\n", sha(f.archive), oldName))
+	f.body["/sums"] = replaySums
+	f.body["/sig"] = sshsig.SignEd25519(f.priv, replaySums, signatureNamespace)
+	replay := &githubRelease{TagName: "v99.0.0", Assets: []githubAsset{
+		{Name: archiveName("v99.0.0", runtime.GOOS, runtime.GOARCH), BrowserDownloadURL: f.rel.Assets[0].BrowserDownloadURL},
+		f.rel.Assets[1], f.rel.Assets[2]}}
+	if err := try(replay); err == nil || installed != "" || !strings.Contains(err.Error(), "do not list") {
+		t.Fatalf("an old signed release under a new tag must be refused: err=%v", err)
+	}
+	f.body["/sums"], f.body["/sig"] = goodSums, sshsig.SignEd25519(f.priv, goodSums, signatureNamespace)
+
+	// a tag that is not a version, and one older than the running build
+	if err := try(&githubRelease{TagName: "latest", Assets: f.rel.Assets}); err == nil || installed != "" {
+		t.Fatalf("a tag that is not a version must be refused: err=%v", err)
+	}
+	oldV := version.Version
+	version.Version = "v10.0.0"
+	if err := try(f.rel); err == nil || installed != "" || !strings.Contains(err.Error(), "not downgrading") {
+		t.Fatalf("an older release must be refused inside installLatest: err=%v", err)
+	}
+	version.Version = oldV
 
 	// no key compiled in
 	releaseKeys = nil
@@ -189,7 +214,7 @@ func TestInstallLatestVerifiesSignatureAndChecksumBeforeInstalling(t *testing.T)
 	releaseKeys = []string{f.pubLine}
 
 	// downloads only from the release host
-	foreign := &githubRelease{TagName: "v9", Assets: []githubAsset{
+	foreign := &githubRelease{TagName: "v9.0.0", Assets: []githubAsset{
 		{Name: f.rel.Assets[0].Name, BrowserDownloadURL: "https://evil.example/archive"},
 		f.rel.Assets[1], f.rel.Assets[2]}}
 	if err := try(foreign); err == nil || installed != "" || !strings.Contains(err.Error(), "refusing to download") {

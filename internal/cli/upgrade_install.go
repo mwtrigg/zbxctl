@@ -17,9 +17,10 @@ import (
 	"strings"
 
 	"github.com/mwtrigg/zbxctl/internal/sshsig"
+	"github.com/mwtrigg/zbxctl/internal/version"
 )
 
-// Release archives are named zbxctl_<os>_<arch>.tar.gz (zip on Windows) and are
+// Release archives are named zbxctl_<version>_<os>_<arch>.tar.gz (zip on Windows) and are
 // listed, with their sha256, in the release's checksums.txt.
 
 const maxDownload = 200 << 20 // a zbxctl archive is a few MB; refuse anything absurd
@@ -32,13 +33,17 @@ const signatureNamespace = "zbxctl-release"
 // whatever the release API answers.
 var releaseURLPrefix = "https://github.com/mwtrigg/zbxctl/releases/download/"
 
-// archiveName is the release asset for a platform.
-func archiveName(goos, goarch string) string {
+// archiveName is the release asset for a version and platform. The version is in
+// the name on purpose: checksums.txt is signed, so the signature covers which
+// version each archive is. Without it the same file names appear in every
+// release, and anyone who can publish a release could attach an old, signed,
+// vulnerable build under a new tag and have it accepted as an upgrade.
+func archiveName(version, goos, goarch string) string {
 	ext := ".tar.gz"
 	if goos == "windows" {
 		ext = ".zip"
 	}
-	return fmt.Sprintf("zbxctl_%s_%s%s", goos, goarch, ext)
+	return fmt.Sprintf("zbxctl_%s_%s_%s%s", strings.TrimPrefix(version, "v"), goos, goarch, ext)
 }
 
 func binaryName(goos string) string {
@@ -144,7 +149,13 @@ func installLatest(ctx context.Context, rel *githubRelease) error {
 	if len(releaseKeys) == 0 {
 		return fmt.Errorf("this build has no release signing key compiled in, so downloads cannot be verified; update by hand (see the README)")
 	}
-	want := archiveName(runtime.GOOS, runtime.GOARCH)
+	if _, ok := semverParts(rel.TagName); !ok {
+		return fmt.Errorf("the release tag %q is not a version number; not installing", rel.TagName)
+	}
+	if olderRelease(version.Version, rel.TagName) {
+		return fmt.Errorf("the release (%s) is older than the version running (%s); not downgrading", rel.TagName, version.Version)
+	}
+	want := archiveName(rel.TagName, runtime.GOOS, runtime.GOARCH)
 	var archiveURL, sumsURL, sigURL string
 	for _, a := range rel.Assets {
 		switch a.Name {
@@ -181,6 +192,11 @@ func installLatest(ctx context.Context, rel *githubRelease) error {
 	archive, err := fetchBytes(ctx, archiveURL, maxDownload)
 	if err != nil {
 		return fmt.Errorf("downloading %s: %w", want, err)
+	}
+	// The signed checksums must list this very archive name, which carries the
+	// version: a replayed older release lists its own version's name instead.
+	if _, ok := checksumFor(string(sums), want); !ok {
+		return fmt.Errorf("the signed checksums do not list %s, so this release is not what its tag says; not installing", want)
 	}
 	if err := verifyChecksum(archive, string(sums), want); err != nil {
 		return err

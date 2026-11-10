@@ -17,6 +17,9 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    # The signing key lives in the `release` environment, which requires a reviewer to
+    # approve every run, so a pushed tag alone cannot get a release signed.
+    environment: release
     permissions:
       contents: write       # publish the release
       id-token: write       # attestations
@@ -27,13 +30,15 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: go.mod
+          go-version: "1.25"   # the newest 1.25.x patch, so releases and CI carry the stdlib fixes
       - name: Test before releasing
         run: |
           go vet ./...
           go test ./...
           go run scripts/notices/main.go | diff -u THIRD_PARTY_NOTICES.md -
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          syft-version: v1.57.0
       - name: Put the signing key in place
         env:
           ZBXCTL_SIGNING_KEY: ${{ secrets.ZBXCTL_SIGNING_KEY }}
@@ -44,7 +49,7 @@ jobs:
           echo "ZBXCTL_SIGNING_KEY_FILE=$RUNNER_TEMP/zbxctl_signing_key" >> "$GITHUB_ENV"
       - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
-          version: "~> v2"
+          version: "v2.19.0"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -38,3 +38,20 @@ CI fails if `THIRD_PARTY_NOTICES.md` or `go.mod`/`go.sum` are out of date.
 
 By contributing you agree that your contribution is licensed under the MIT License, the same as the
 rest of the project.
+
+## Releasing (maintainers)
+
+Releases are built and signed by `.github/workflows/release.yml` when a `v*` tag is pushed.
+One-time repository setup that the workflow relies on:
+
+- A `release` environment with a required reviewer, holding the `ZBXCTL_SIGNING_KEY` secret
+  (an ed25519 SSH key; the public half is compiled in as `internal/cli/release_keys.go` and
+  published as `docs/release-signing-key.pub`). Keep the secret out of the repository-level
+  secrets, so that a pushed tag alone cannot get anything signed.
+- A tag ruleset for `v*` that only maintainers can create, and a branch ruleset for `main`.
+- Private vulnerability reporting turned on (see SECURITY.md).
+
+The version is part of every archive name (`zbxctl_<version>_<os>_<arch>`) because the signed
+`checksums.txt` has to bind each archive to its version; `zbxctl upgrade` refuses a release whose
+signed checksums do not list the archive named after its tag. GoReleaser, syft and govulncheck
+are pinned to exact versions in the workflows; bump them on purpose, not by floating.

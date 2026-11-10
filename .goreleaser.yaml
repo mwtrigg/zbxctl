@@ -1,7 +1,8 @@
 # GoReleaser configuration: `goreleaser release --clean` on a pushed v* tag builds the
-# archives, checksums and SBOMs. Archive names are fixed (zbxctl_<os>_<arch>) because
-# `zbxctl upgrade` looks them up by name; change them only together with
-# internal/cli/upgrade_install.go.
+# archives, checksums and SBOMs. Archive names carry the version
+# (zbxctl_<version>_<os>_<arch>) because the signed checksums.txt must bind each
+# archive to its version; `zbxctl upgrade` looks them up by that name. Change them
+# only together with internal/cli/upgrade_install.go.
 version: 2
 project_name: zbxctl
 
@@ -20,7 +21,7 @@ builds:
 
 archives:
   - id: zbxctl
-    name_template: "zbxctl_{{ .Os }}_{{ .Arch }}"
+    name_template: "zbxctl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows
