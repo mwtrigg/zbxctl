@@ -37,9 +37,13 @@ Priority: CLI flag > `ZBXCTL_*` env var (`ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXC
 
 `permissions` caps what a context may do: `readonly` blocks all writes, `operator` allows enable/disable/acknowledge/maintenance, `write` allows everything. `run script` additionally needs the script listed in the context's `allowed_scripts` and a one-time confirmation token.
 
+## Output and connection options
+
+`--timeout` (default 180s) bounds each API request, `--retries` (default 2) repeats read-only calls after a connection error or a 502/503/504 (writes are never retried), and `--tz America/New_York` (or `ZBXCTL_TZ`, or `local`) renders times in that zone with an explicit offset instead of UTC.
+
 ## Output
 
-JSON is the default. `-o jsonl` gives one object per line, `-o table` is for humans.
+JSON is the default. `-o jsonl` gives one object per line, `-o csv` a header plus rows, `-o table` is for humans.
 
 ```json
 {"data": [ {...}, {...} ], "meta": {"count": 2, "command": "get hosts"}}
@@ -63,10 +67,13 @@ Errors go to stderr as `{"error": "...", "kind": "...", "code": N}`.
 Read (never change anything):
 
 ```
-get hosts | host | items | latestdata | history | interfaces
+get hosts | host | items | latestdata | history | trends | interfaces
 get triggers | problems | events | alerts
-get templates | template | groups | users | user | usergroups | scripts
+get discovery | lost items | lost triggers
+get templates | template | groups | users | user | usergroups | scripts | macros | actions
+backtest --item k --when 'avg(5m)>90'   # replay an alert idea over history/trends; judge it against real problems
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
+diagnose trigger <id>|<event> --event   # why a problem is open: disabled trigger/host/items, unsupported items, suppression, manual close off
 auth status | context list | context use <name>
 ```
 
@@ -75,13 +82,17 @@ Write (dry run unless `--apply`; `--yes` is an alias):
 ```
 enable | disable  host <host> | trigger <id>
 acknowledge <event-id> [--message ...] [--close | --unacknowledge | --suppress [--until t] | --unsuppress] [--severity s]
-maintenance list | create | delete
+maintenance list | create | extend | shorten | delete
 create host | update host | delete host
 tag host <host> --tag k [--value v]   untag host <host> --tag k [--value v]
 create user | delete user | create usergroup | delete usergroup
+delete template <name> [--allow-linked]   # before-state keeps a full export
+delete lost items|triggers [--host h] [--close-problems]   # only objects that discovery lost
 import template|host <file>       # without --apply: shows the diff only
 run script <name> --host <host>   # dangerous: executes code on a monitored host
 ```
+
+Bulk writes: `enable|disable host|trigger`, `acknowledge`, `maintenance extend|shorten|delete` and `delete host` take several targets (arguments and/or `--id-file`, one per line). All targets are resolved first, so a typo changes nothing; `--expect N` refuses to run unless exactly N distinct targets resolve; with `--apply` a before-state file is saved under `~/.local/state/zbxctl/` (`--state-dir`, `--no-state`) and every change is re-read to verify it (`--no-verify` skips that). `acknowledge --close` only closes problems whose trigger allows manual close and acknowledges the others instead, then re-checks after about 15 seconds since closing is asynchronous.
 
 `delete user` refuses `Admin` and the user that owns the credentials in use. `create user` takes the password from `--password-file` or `--password-stdin`, never from a flag value.
 
@@ -90,12 +101,21 @@ Export, diff and import of templates and hosts:
 ```
 zbxctl export template web-base --file web-base.yaml     # yaml | json | xml
 zbxctl diff template web-base.yaml                       # what an import would change, read-only
-zbxctl import template web-base.yaml --apply             # never deletes anything missing from the file
+zbxctl diff template --dir ./templates                   # the same for every export file in a directory
+zbxctl import template web-base.yaml --apply             # never deletes anything missing from the file; saves the previous export first
+zbxctl export template --dir ./templates --search Linux  # one file per template (hosts: --group <name> or --all)
+zbxctl import template --dir ./templates --expect 12 --apply
 ```
 
 Housekeeping: `version`, `upgrade [--check]`, `completion bash|zsh|fish|powershell`.
 
-`--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `--host` and `--group` accept an ID or a name.
+`--since`/`--until` accept unix seconds, RFC3339, `YYYY-MM-DD`, or relative `30m`, `24h`, `7d`, `2w`. `--severity` accepts `0`-`5` or `not_classified|information|warning|average|high|disaster`. `get problems` triage flags: `--exclude-orphans` drops problems that can never recover (trigger, host or all items disabled), `--suppressed true|false` and `--maintenance` filter on suppression, `--group-by name` collapses the same alert across hosts into one row with a count, the hosts and the event IDs (handy for `acknowledge`).
+
+Backtesting an alert idea: `zbxctl backtest --host web-01 --item system.cpu.util --when 'avg(5m)>90' --since 7d` lists when the condition would have fired (conditions: `last>N`, `avg(5m)>N`, `min(10m)>=N`, `max(1h)<N`, `nodata(10m)`). Add `--real-problem "CPU is high"` (or `--real-event ID`) to judge each fire against real problems on the same host: true alert with its lead time in minutes, false alarm, and missed problems; `--summary` gives one row per host. Use `--source trends` for year-long windows.
+
+History and trends: `get history --all` pages through a whole window (no 100-row stop), `--step 5m` keeps one value per bucket, `--gaps-over 10m` lists the silences instead of the samples; `get trends` returns hourly min/avg/max of numeric items for baselines and long look-backs.
+
+`--host` and `--group` accept an ID or a name.
 
 On list commands `--filter KEY=VALUE` (repeatable) adds an exact-match API filter and `--field NAME` prints just that field, one value per line, for shell use.
 

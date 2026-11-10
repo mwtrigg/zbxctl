@@ -30,6 +30,7 @@ type TriggerFilter struct {
 	MinSeverity  string // "0"–"5", ""=all
 	Status       string // "0"=enabled, "1"=disabled, ""=all
 	OnlyProblems bool   // if true, only triggers currently in PROBLEM state (value=1)
+	Search       string // substring of the description
 	Limit        int
 	SortField    string // "priority" | "lastchange" | "description"
 	SortOrder    string // "ASC" | "DESC"
@@ -59,6 +60,9 @@ func GetTriggers(c *api.Client, f TriggerFilter) ([]Trigger, error) {
 	}
 	if f.MinSeverity != "" {
 		params["min_severity"] = f.MinSeverity
+	}
+	if f.Search != "" {
+		params["search"] = map[string]any{"description": f.Search}
 	}
 	if f.Limit > 0 {
 		params["limit"] = f.Limit

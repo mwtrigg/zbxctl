@@ -92,3 +92,72 @@ func TestUserDeleteBlocks(t *testing.T) {
 		t.Errorf("ordinary user refused: %v", err)
 	}
 }
+
+func TestNormalizeProblemName(t *testing.T) {
+	p := resources.Problem{Name: "/boot is low on web-01 (below 700M)", Hosts: []string{"web-01"}}
+	if got := normalizeProblemName(p); got != "/boot is low on <host> (below 700M)" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func hrec(item string, clock int64) resources.HistoryRecord {
+	return resources.HistoryRecord{ItemID: item, Host: "h", Key: "k", ClockUnix: clock}
+}
+
+func TestDownsampleKeepsLastPerBucketPerItem(t *testing.T) {
+	recs := []resources.HistoryRecord{hrec("1", 0), hrec("1", 10), hrec("2", 11), hrec("1", 70), hrec("1", 75)}
+	got := downsampleHistory(recs, time.Minute)
+	if len(got) != 3 || got[0].ClockUnix != 10 || got[1].ItemID != "2" || got[2].ClockUnix != 75 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestFindHistoryGapsIncludingWindowEdges(t *testing.T) {
+	recs := []resources.HistoryRecord{hrec("1", 100), hrec("1", 160), hrec("1", 1000), hrec("1", 1060)}
+	gaps := findHistoryGaps(recs, 5*time.Minute, 0, 2000)
+	if len(gaps) != 2 || gaps[0].from != 160 || gaps[0].to != 1000 || gaps[1].edge != "end" || gaps[1].from != 1060 {
+		t.Fatalf("gaps: %+v", gaps)
+	}
+	if g := findHistoryGaps(recs, 5*time.Minute, 0, 1200); len(g) != 1 {
+		t.Fatalf("end gap should not count when it is shorter than the limit: %+v", g)
+	}
+	if g := findHistoryGaps(recs, time.Hour, 0, 0); len(g) != 0 {
+		t.Fatalf("no gaps over an hour: %+v", g)
+	}
+}
+
+func TestDisplayZoneRendersOffsetAndHandlesDST(t *testing.T) {
+	defer setDisplayZone("")
+	if err := setDisplayZone("America/New_York"); err != nil {
+		t.Skip("tz database not available")
+	}
+	if got := fmtUnix("1783000000"); got != "2026-07-02T09:46:40-04:00" { // EDT
+		t.Errorf("summer: %q", got)
+	}
+	if got := fmtUnix("1800000000"); got != "2027-01-15T03:00:00-05:00" { // EST
+		t.Errorf("winter: %q", got)
+	}
+	if err := setDisplayZone("Not/AZone"); err == nil || fmtUnix("1783000000") != "2026-07-02T13:46:40Z" {
+		t.Errorf("an unknown zone must fall back to UTC with a warning")
+	}
+}
+
+func TestFutureRelativeTimesLookAhead(t *testing.T) {
+	now := time.Now().Unix()
+	got, err := parseFutureTime("7d")
+	if err != nil || got-now < 7*86400-2 || got-now > 7*86400+2 {
+		t.Fatalf("7d from now, got %d (now %d) err=%v", got, now, err)
+	}
+	past, _ := parseTimestamp("7d")
+	if past >= now {
+		t.Fatal("parseTimestamp keeps meaning 'ago'")
+	}
+	if n, err := parseTimestamp("now"); err != nil || n-now > 2 {
+		t.Fatalf("now: %d %v", n, err)
+	}
+	for in, want := range map[string]time.Duration{"90": 90 * time.Minute, "30m": 30 * time.Minute, "2h": 2 * time.Hour, "1d": 24 * time.Hour} {
+		if d, err := parseDurationFlexible(in); err != nil || d != want {
+			t.Errorf("%s: %v %v", in, d, err)
+		}
+	}
+}

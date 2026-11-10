@@ -3,6 +3,7 @@ package resources
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
 )
@@ -15,6 +16,38 @@ type Maintenance struct {
 	ActiveTill      string `json:"active_till"`  // Unix timestamp
 	Description     string `json:"description"`
 	MaintenanceType string `json:"maintenance_type"` // "0"=with data collection, "1"=without
+
+	Hosts []struct {
+		Host string `json:"host"`
+	} `json:"hosts"`
+	HostGroups  []NamedRef   `json:"hostgroups"`
+	TimePeriods []TimePeriod `json:"timeperiods"`
+}
+
+// TimePeriod is one period of a maintenance window.
+type TimePeriod struct {
+	Type      string `json:"timeperiod_type"` // "0" one-time
+	StartDate string `json:"start_date"`      // Unix, one-time periods
+	Period    string `json:"period"`          // seconds
+}
+
+// HostNames returns the names of the hosts in the window.
+func (m Maintenance) HostNames() []string {
+	out := make([]string, len(m.Hosts))
+	for i, h := range m.Hosts {
+		out[i] = h.Host
+	}
+	return out
+}
+
+// GroupNames returns the names of the host groups in the window.
+func (m Maintenance) GroupNames() []string { return names(m.HostGroups) }
+
+// maintSelects adds the related objects every maintenance read needs.
+func maintSelects(params map[string]any) {
+	params["selectHosts"] = []string{"host"}
+	params["selectHostGroups"] = []string{"name"}
+	params["selectTimeperiods"] = []string{"timeperiod_type", "start_date", "period"}
 }
 
 // MaintenanceFilter controls which maintenances are returned.
@@ -29,6 +62,7 @@ func GetMaintenances(c *api.Client, f MaintenanceFilter) ([]Maintenance, error) 
 		"sortfield": "name",
 		"sortorder": "ASC",
 	}
+	maintSelects(params)
 	if f.Limit > 0 {
 		params["limit"] = f.Limit
 	}
@@ -49,6 +83,7 @@ func GetMaintenanceByName(c *api.Client, name string) (*Maintenance, error) {
 		"output": []string{"maintenanceid", "name", "active_since", "active_till", "description", "maintenance_type"},
 		"filter": map[string]any{"name": []string{name}},
 	}
+	maintSelects(params)
 	raw, err := c.Call("maintenance.get", params)
 	if err != nil {
 		return nil, fmt.Errorf("maintenance.get: %w", err)
@@ -147,6 +182,7 @@ func ResolveMaintenance(c *api.Client, idOrName string) (*Maintenance, error) {
 			"output":         []string{"maintenanceid", "name", "active_since", "active_till", "description", "maintenance_type"},
 			"maintenanceids": []string{idOrName},
 		}
+		maintSelects(params)
 		raw, err := c.Call("maintenance.get", params)
 		if err != nil {
 			return nil, fmt.Errorf("maintenance.get: %w", err)
@@ -161,4 +197,39 @@ func ResolveMaintenance(c *api.Client, idOrName string) (*Maintenance, error) {
 		return &result[0], nil
 	}
 	return GetMaintenanceByName(c, idOrName)
+}
+
+// SetMaintenanceEnd moves the end of a one-time maintenance window to newTill
+// (Unix), changing active_till and the period length together so the window
+// stays consistent. Windows with recurring periods are refused.
+func SetMaintenanceEnd(c *api.Client, m *Maintenance, newTill int64) error {
+	if err := CheckMaintenanceEnd(m, newTill); err != nil {
+		return err
+	}
+	start, _ := strconv.ParseInt(m.TimePeriods[0].StartDate, 10, 64)
+	_, err := c.Call("maintenance.update", map[string]any{
+		"maintenanceid": m.MaintenanceID,
+		"active_till":   newTill,
+		"timeperiods":   []map[string]any{{"timeperiod_type": 0, "start_date": start, "period": newTill - start}},
+	})
+	if err != nil {
+		return fmt.Errorf("maintenance.update: %w", err)
+	}
+	return nil
+}
+
+// CheckMaintenanceEnd says whether the end of m can move to newTill: the window
+// must be a single one-time period and the new end must come after its start.
+func CheckMaintenanceEnd(m *Maintenance, newTill int64) error {
+	if len(m.TimePeriods) != 1 || m.TimePeriods[0].Type != "0" {
+		return fmt.Errorf("maintenance %q is not a single one-time window; change it in Zabbix", m.Name)
+	}
+	start, err := strconv.ParseInt(m.TimePeriods[0].StartDate, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parsing start_date %q: %w", m.TimePeriods[0].StartDate, err)
+	}
+	if newTill <= start {
+		return fmt.Errorf("the new end %d is not after the window start: maintenance %q starts at %d", newTill, m.Name, start)
+	}
+	return nil
 }
