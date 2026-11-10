@@ -535,9 +535,12 @@ var runScriptCmd = &cobra.Command{
 SECURITY: This command executes code on a monitored host. It requires:
   - the operator or write permission tier
   - allowed_scripts in the active context config, each entry pinned to the script's
-    whole definition (command, where it runs, parameters, user) as name@sha256:<hash>;
-    a script that changed is refused, and the refusal prints the entry to add once you
-    have reviewed the new one. Scripts whose command uses user macros ({$...}) are refused
+    name, type, scope, where it executes, command, parameters, user, authentication type,
+    port and timeout, as name@sha256:<hash>; a script that changed in any of those is
+    refused, and the refusal prints the entry to add once you have reviewed the new one.
+    Scripts whose command uses user macros ({$...}) are refused (macros in parameters are
+    not checked); fields outside the pin (group, host access, confirmation, credentials)
+    are not covered
   - a confirmation token typed at a terminal; --yes has no effect on this command
 
 What this protects, and what it does not: the allowlist stops a script from running

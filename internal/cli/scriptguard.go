@@ -12,8 +12,9 @@ import (
 )
 
 // scriptPin is the allowlist entry for a script: its name (or ID) and a hash of
-// its whole definition, canonical JSON of the name, type, scope, where it executes,
-// the command and its parameters, the user, the authentication type and the port.
+// its definition, canonical JSON of the name, type, scope, where it executes, the
+// command and its parameters, the user, the authentication type, the port and the
+// timeout (not every field: see Script.Definition).
 // A script's name says nothing about what it does: anyone who can edit scripts in
 // Zabbix could otherwise swap the command of an allowlisted script after it was
 // reviewed, or move it from the agent to the Zabbix server.

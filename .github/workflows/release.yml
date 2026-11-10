@@ -3,6 +3,12 @@ name: Release
 # Push a tag like v0.1.0-rc.1 or v0.1.0 to build and publish a release. The notes come from
 # CHANGELOG.md, never from commit subjects.
 #
+# Two jobs. `verify` has no secrets and no environment: it checks that the tag points at a
+# commit that is on main, then runs the vet, the tests and the notices check (the only place
+# repository code is executed). `release` needs it, runs in the protected `release`
+# environment (a reviewer approves every run), and only compiles the code through GoReleaser,
+# so the signing key is never in the same job as the test code.
+#
 # The release is signed: checksums.txt is signed with the ZBXCTL_SIGNING_KEY
 # secret (an ed25519 SSH key) into checksums.txt.sig, which `zbxctl upgrade`
 # verifies against the public key compiled into the binary. Once the repository
@@ -16,7 +22,30 @@ permissions:
   contents: read
 
 jobs:
-  goreleaser:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag must point at a commit that is on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main: not releasing"; exit 1; }
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26"   # the newest 1.26.x patch (1.25 is out of support): releases and CI carry the stdlib fixes
+      - name: Test before releasing
+        run: |
+          go vet ./...
+          go test ./...
+          go run scripts/notices/main.go | diff -u THIRD_PARTY_NOTICES.md -
+      - name: There are release notes for this tag
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
+
+  release:
+    needs: verify
     runs-on: ubuntu-latest
     # The signing key lives in the `release` environment, which requires a reviewer to
     # approve every run, so a pushed tag alone cannot get a release signed.
@@ -29,14 +58,14 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false   # the token does not sit in .git/config next to the signing key
+      - name: The tag must point at a commit that is on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main: not releasing"; exit 1; }
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26"   # the newest 1.26.x patch (1.25 is out of support): releases and CI carry the stdlib fixes
-      - name: Test before releasing
-        run: |
-          go vet ./...
-          go test ./...
-          go run scripts/notices/main.go | diff -u THIRD_PARTY_NOTICES.md -
+          go-version: "1.26"
       - name: Release notes from CHANGELOG.md
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
@@ -56,6 +85,10 @@ jobs:
           args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Build the tag that was pushed. Without this GoReleaser takes the highest tag on the
+          # commit, which for v0.1.0 on the same commit as v0.1.0-rc.1 is the rc: it would
+          # rebuild 0.1.0-rc.1 under the final tag.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       - name: Remove the signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/zbxctl_signing_key"

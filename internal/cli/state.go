@@ -41,7 +41,10 @@ ZBXCTL_BEFORE_STATE=false or --no-state. Together they are an audit trail of wha
 The directory is --state-dir, else ZBXCTL_STATE_DIR, else state_dir in the config, else
 ~/.local/state/zbxctl. Only the newest 200 files are kept (state_keep in the config,
 ZBXCTL_STATE_KEEP or --state-keep; 0 keeps everything); older ones are deleted as new ones are
-written, and zbxctl says so when it does.`,
+written, and zbxctl says so when it does. Writes made through the MCP server never prune (an agent
+must not be able to rotate the audit trail away), so a directory that only the MCP server writes to
+grows until a person runs a CLI write or "state prune". Files with a target whose outcome is
+unresolved (pending, sent, unknown) are never pruned automatically.`,
 }
 
 // resolveStateDir finds the directory without needing a Zabbix connection.

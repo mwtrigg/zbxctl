@@ -55,6 +55,7 @@ contexts:
   lab:
     url: https://zabbix.example.com
     api_token: "<your API token>"     # or point ZBXCTL_API_TOKEN at it
+    permissions: write                # without this a connection is readonly and changes are refused (exit 8)
 ```
 
 Then:
@@ -102,7 +103,7 @@ writing, and only zbxctl) but never stronger: it cannot give a token powers Zabb
 | `--apply` on a change | Saves a **before-state file** (what was done, what the target looked like before), applies the changes one by one, then re-reads each target to **verify** it. |
 | `delete user` | Refuses `Admin` and the user that owns the credentials in use. |
 | Secrets | Passwords and secret macro values come from a file or stdin, never a flag; secret values are never printed or saved. |
-| `run script` | Opt-in per context (`allowed_scripts`), operator tier, the script pinned to its whole definition (`name@sha256:<hash>`: command, where it runs, parameters, user; an edited script is refused, and so is one that uses `{$MACROS}`), and a one-time code typed at a terminal. It stops accidents and casual automation; **it is not a barrier against a program running as your user**, which can allocate a terminal and type the code back. Do not set `allowed_scripts` on a context an agent can use. The MCP server does not offer it. |
+| `run script` | Opt-in per context (`allowed_scripts`), operator tier, the script pinned to its name, type, scope, where it executes, command, parameters, user, authentication type, port and timeout (`name@sha256:<hash>`; an edited script is refused, and so is one whose *command* uses `{$MACROS}`; fields outside that list, such as group, host access, confirmation text or stored credentials, are not part of the pin), and a one-time code typed at a terminal. It stops accidents and casual automation; **it is not a barrier against a program running as your user**, which can allocate a terminal and type the code back. Do not set `allowed_scripts` on a context an agent can use. The MCP server does not offer it. |
 
 **Applying by default.** The dry run is the right default for agents and for a first look, and tedious for a person who knows what they are doing. For a connection you trust, set `mode: apply` in the config (or `ZBXCTL_MODE=apply`): changes then happen without `--apply`, and `--dry-run` previews one command. Everything else still protects you: bulk targets are all resolved first, `--expect` still guards, the before-state file is still saved and the result is still verified, `delete user` still refuses `Admin`, and `run script` still needs its allowlist and confirmation code. `state prune` deletes audit files, so it always needs an explicit `--apply`. `zbxctl auth status` shows the mode of the connection in use. **The MCP server ignores this setting**: an agent calling it always gets a dry run unless it passes `apply: true`.
 
@@ -112,7 +113,7 @@ Permission tiers cap what a connection may do: `permissions: readonly | operator
 |---|---|
 | `readonly` | every `get`, `diagnose`, `export`, `state list/show`, `api call` for read methods; nothing that changes Zabbix |
 | `operator` | the above, plus day-to-day operations: `enable` / `disable` host or trigger, `acknowledge` / `unacknowledge` / `suppress` / `unsuppress`, `maintenance create` / `extend` / `shorten` / `delete`, and `run script` (still behind its pinned allowlist) |
-| `write` (the default when `permissions` is not set) | everything else: create, update and delete hosts, templates, groups, items, triggers, macros, value maps, regular expressions and users, tags, `import`, and `api call` writes |
+| `write` (never the default: set `permissions: write`) | everything else: create, update and delete hosts, templates, groups, items, triggers, macros, value maps, regular expressions and users, tags, `import`, and `api call` writes |
 
 ### The audit trail
 
@@ -272,6 +273,7 @@ Priority for every setting: command-line flag, then environment variable, then t
 |---|---|
 | `ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXCTL_USERNAME`, `ZBXCTL_PASSWORD` | the connection |
 | `ZBXCTL_CONTEXT` | which context to use |
+| `ZBXCTL_PERMISSIONS` | `readonly`, `operator` or `write`. Sets the tier of a context that sets none, and can *lower* a configured tier; it can never raise one (a context written `readonly` stays readonly) |
 | `ZBXCTL_INSECURE`, `ZBXCTL_CA_FILE` | TLS (`--insecure` always prints a warning) |
 | `ZBXCTL_API_VERSION` | pin the Zabbix version |
 | `ZBXCTL_MODE` | `dry-run` (default) or `apply`: what a change does when neither `--apply` nor `--dry-run` is given |

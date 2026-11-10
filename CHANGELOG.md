@@ -38,10 +38,10 @@ zbxctl is a guardrail, not a security boundary: real enforcement is a least-priv
   errors; a connection with no `permissions` set is `readonly` (`permissions: write` or `ZBXCTL_PERMISSIONS=write`
   allows changes).
 - MCP: an agent's arguments are positional values only (they cannot turn into flags), the server pins its context
-  when it starts, offers no file-path, `api call`, `run script` or `state prune` tools, never prunes the audit trail
+  when it starts, offers no file-path, `api call`, `run script` or `state prune` tools, never prunes the audit trail (an MCP-only installation keeps adding state files until a person runs a CLI write or `state prune`)
   and marks results as untrusted data.
-- `run script` is opt-in per context, needs the operator tier, and its allowlist entries are pinned to the whole
-  script definition (`name@sha256:<hash>`); the typed confirmation stops accidents, not a program running as you.
+- `run script` is opt-in per context, needs the operator tier, and its allowlist entries are pinned to the script's name, type, scope, execution
+  target, command, parameters, user, auth type, port and timeout (`name@sha256:<hash>`); the typed confirmation stops accidents, not a program running as you.
 - Table output shows control characters as visible escapes; exports are written 0600; warnings for a plain `http://`
   URL and for a world-readable config file that holds credentials.
 

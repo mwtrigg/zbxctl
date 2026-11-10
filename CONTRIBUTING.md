@@ -48,7 +48,8 @@ One-time repository setup that the workflow relies on:
   (an ed25519 SSH key; the public half is compiled in as `internal/cli/release_keys.go` and
   published as `docs/release-signing-key.pub`). Keep the secret out of the repository-level
   secrets, so that a pushed tag alone cannot get anything signed.
-- A tag ruleset for `v*` that only maintainers can create, and a branch ruleset for `main`.
+- A tag ruleset for `v*` that blocks moving and deleting tags (add a `creation` rule with the owner as bypass if only the owner should be able to create them), and a branch ruleset for `main`. The release workflow refuses a tag whose commit is not on `main`, and the `release` environment's reviewer approves every run.
+- Cut the final release on its own commit (the one that renames `[Unreleased]` to the version in CHANGELOG.md), not on the commit that already carries a release candidate tag.
 - Private vulnerability reporting turned on (see SECURITY.md).
 
 The version is part of every archive name (`zbxctl_<version>_<os>_<arch>`) because the signed
