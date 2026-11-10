@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mwtrigg/zbxctl/internal/config"
 )
@@ -29,6 +30,14 @@ func (e *RPCError) Error() string {
 	}
 	return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message)
 }
+
+// Timeout bounds each API request. Big estates can take minutes for one call,
+// so the default is generous; the CLI exposes it as --timeout.
+var Timeout = 180 * time.Second
+
+// Retries is how many times a read-only call is retried after a connection
+// error or a 502/503/504 answer (writes are never retried).
+var Retries = 2
 
 // Sentinel errors the CLI maps to exit codes.
 var (
@@ -82,8 +91,8 @@ func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 		return nil, err
 	}
 
-	httpClient := &http.Client{Transport: transport}
-	endpoint := cfg.URL + "/api_jsonrpc.php"
+	httpClient := &http.Client{Transport: transport, Timeout: Timeout}
+	endpoint := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/api_jsonrpc.php") + "/api_jsonrpc.php"
 
 	c := &Client{
 		httpClient: httpClient,
@@ -172,7 +181,39 @@ func (c *Client) APIVersion() (string, error) {
 	return ver, nil
 }
 
+// isRead reports methods that are safe to repeat.
+func isRead(method string) bool {
+	return strings.HasSuffix(method, ".get") || method == "apiinfo.version" || method == "user.checkAuthentication" ||
+		method == "configuration.export" || method == "configuration.importcompare"
+}
+
 func (c *Client) callRaw(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	attempts := 1
+	if isRead(method) {
+		attempts += Retries
+	}
+	var raw json.RawMessage
+	var err error
+	for i := 0; i < attempts; i++ {
+		raw, err = c.callOnce(ctx, method, params)
+		if err == nil || !retryable(err) || i == attempts-1 {
+			return raw, err
+		}
+		time.Sleep(time.Duration(i+1) * retryBackoff)
+	}
+	return raw, err
+}
+
+func retryable(err error) bool {
+	return errors.Is(err, ErrConnect) || errors.Is(err, errBadGateway)
+}
+
+// retryBackoff is the base wait between retries.
+var retryBackoff = 500 * time.Millisecond
+
+var errBadGateway = errors.New("gateway error")
+
+func (c *Client) callOnce(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	req := rpcRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -201,6 +242,9 @@ func (c *Client) callRaw(ctx context.Context, method string, params any) (json.R
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return nil, fmt.Errorf("%w: HTTP %d", ErrAuth, resp.StatusCode)
+	}
+	if resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout {
+		return nil, fmt.Errorf("%w: HTTP %d", errBadGateway, resp.StatusCode)
 	}
 
 	var rpcResp rpcResponse

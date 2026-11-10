@@ -37,6 +37,10 @@ Priority: CLI flag > `ZBXCTL_*` env var (`ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXC
 
 `permissions` caps what a context may do: `readonly` blocks all writes, `operator` allows enable/disable/acknowledge/maintenance, `write` allows everything. `run script` additionally needs the script listed in the context's `allowed_scripts` and a one-time confirmation token.
 
+## Output and connection options
+
+`--timeout` (default 180s) bounds each API request, `--retries` (default 2) repeats read-only calls after a connection error or a 502/503/504 (writes are never retried), and `--tz America/New_York` (or `ZBXCTL_TZ`, or `local`) renders times in that zone with an explicit offset instead of UTC.
+
 ## Output
 
 JSON is the default. `-o jsonl` gives one object per line, `-o csv` a header plus rows, `-o table` is for humans.
@@ -66,7 +70,7 @@ Read (never change anything):
 get hosts | host | items | latestdata | history | trends | interfaces
 get triggers | problems | events | alerts
 get discovery | lost items | lost triggers
-get templates | template | groups | users | user | usergroups | scripts
+get templates | template | groups | users | user | usergroups | scripts | macros | actions
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
 diagnose trigger <id>|<event> --event   # why a problem is open: disabled trigger/host/items, unsupported items, suppression, manual close off
 auth status | context list | context use <name>
@@ -95,6 +99,7 @@ Export, diff and import of templates and hosts:
 ```
 zbxctl export template web-base --file web-base.yaml     # yaml | json | xml
 zbxctl diff template web-base.yaml                       # what an import would change, read-only
+zbxctl diff template --dir ./templates                   # the same for every export file in a directory
 zbxctl import template web-base.yaml --apply             # never deletes anything missing from the file
 ```
 

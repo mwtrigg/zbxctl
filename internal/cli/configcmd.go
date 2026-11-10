@@ -16,6 +16,7 @@ var (
 	exportFormat string
 	exportFile   string
 	importFormat string
+	diffDir      string
 )
 
 var exportCmd = &cobra.Command{Use: "export", Short: "Export a template or host as yaml, json or xml"}
@@ -52,12 +53,24 @@ func init() {
 		importCmd.AddCommand(im)
 
 		df := &cobra.Command{
-			Use:   noun + " <file>",
-			Short: "Show what importing this " + noun + " file would change",
-			Args:  cobra.ExactArgs(1),
-			RunE:  func(cmd *cobra.Command, args []string) error { return runImport(noun, args[0], false) },
+			Use:   noun + " <file> | --dir <dir>",
+			Short: "Show what importing this " + noun + " file (or every file in a directory) would change",
+			Args:  cobra.MaximumNArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if diffDir != "" {
+					if len(args) > 0 {
+						return &usageError{"give a file or --dir, not both"}
+					}
+					return runDiffDir(noun, diffDir)
+				}
+				if len(args) != 1 {
+					return &usageError{"give a file or --dir <directory>"}
+				}
+				return runImport(noun, args[0], false)
+			},
 		}
 		df.Flags().StringVar(&importFormat, "format", "", "yaml | json | xml (default: from the file extension)")
+		df.Flags().StringVar(&diffDir, "dir", "", "compare every .yaml/.yml/.json/.xml file in this directory against the live server")
 		diffCmd.AddCommand(df)
 	}
 	rootCmd.AddCommand(exportCmd, importCmd, diffCmd)
@@ -168,4 +181,48 @@ func runImport(noun, path string, isImport bool) error {
 		r["applied"] = true
 	}
 	return output.Print(outFmt, append(cols, output.Column{Key: "applied", Header: "APPLIED"}), rows)
+}
+
+// runDiffDir compares every export file in dir with the live server and prints
+// one flat list; a file with no differences contributes no rows.
+func runDiffDir(noun, dir string) error {
+	c, outFmt, _, err := newClient()
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return cliFail(outFmt, fmt.Errorf("reading %s: %w", dir, err))
+	}
+	var rows []map[string]any
+	files := 0
+	for _, e := range entries { // os.ReadDir is sorted by name
+		if e.IsDir() {
+			continue
+		}
+		format, err := formatFor(e.Name(), "")
+		if err != nil {
+			continue // not an export file
+		}
+		files++
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		raw, err := resources.CompareConfig(c, kindOf(noun), format, string(b))
+		if err != nil {
+			return cliFail(outFmt, fmt.Errorf("%s: %w", e.Name(), err))
+		}
+		changes, err := resources.FlattenComparison(raw)
+		if err != nil {
+			return cliFail(outFmt, err)
+		}
+		for _, ch := range changes {
+			rows = append(rows, map[string]any{"file": e.Name(), "action": ch.Action, "path": ch.Path, "fields": ch.Fields})
+		}
+	}
+	if files == 0 {
+		return cliPrintErr(outFmt, "no .yaml, .yml, .json or .xml files in "+dir, output.ExitUsage)
+	}
+	return output.Print(outFmt, []output.Column{{Key: "file", Header: "FILE"}, {Key: "action", Header: "ACTION"}, {Key: "path", Header: "PATH"}, {Key: "fields", Header: "CHANGES"}}, rows)
 }

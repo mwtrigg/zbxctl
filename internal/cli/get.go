@@ -96,7 +96,29 @@ func fmtUnix(s string) string {
 	if err != nil {
 		return s
 	}
-	return time.Unix(n, 0).UTC().Format(time.RFC3339)
+	return time.Unix(n, 0).In(displayLoc).Format(time.RFC3339)
+}
+
+// displayLoc is the zone times are rendered in. Zabbix stores UTC epochs; the
+// offset in the output makes every time unambiguous, DST days included.
+var displayLoc = time.UTC
+
+// setDisplayZone applies --tz: "" or UTC, "local", or an IANA zone name.
+func setDisplayZone(name string) error {
+	switch strings.ToLower(name) {
+	case "", "utc":
+		displayLoc = time.UTC
+	case "local":
+		displayLoc = time.Local
+	default:
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			displayLoc = time.UTC
+			return fmt.Errorf("unknown time zone %q, showing UTC", name)
+		}
+		displayLoc = loc
+	}
+	return nil
 }
 
 // hostStatusLabel converts a Zabbix status string to a human-readable label.
@@ -600,6 +622,7 @@ var (
 	getTriggersStatus   string
 	getTriggersProblem  bool
 	getTriggersLimit    int
+	getTriggersSearch   string
 	getTriggersSortBy   string
 )
 
@@ -616,6 +639,7 @@ func init() {
 	f.StringVar(&getTriggersStatus, "status", "", "filter by status: enabled|disabled")
 	f.BoolVar(&getTriggersProblem, "problem", false, "only show triggers currently in PROBLEM state")
 	f.IntVar(&getTriggersLimit, "limit", 0, "max results")
+	f.StringVar(&getTriggersSearch, "search", "", "substring match on the trigger description")
 	f.StringVar(&getTriggersSortBy, "sort-by", "priority", "sort field: priority|lastchange|description")
 	getCmd.AddCommand(getTriggersCmd)
 }
@@ -629,6 +653,7 @@ func runGetTriggers(cmd *cobra.Command, args []string) error {
 	filter := resources.TriggerFilter{
 		SortField:    getTriggersSortBy,
 		Limit:        effectiveLimit(getTriggersLimit, ctx),
+		Search:       getTriggersSearch,
 		OnlyProblems: getTriggersProblem,
 	}
 
