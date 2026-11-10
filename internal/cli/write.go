@@ -3,7 +3,6 @@ package cli
 import (
 	"bufio"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -27,12 +26,9 @@ func confirm(prompt string) bool {
 		return true
 	}
 	what := strings.TrimSuffix(prompt, "?")
-	if output.Format(flagOutput) == output.FormatTable {
-		fmt.Printf("dry run: would %s (nothing changed; add --apply to execute)\n", what)
-		return false
-	}
-	b, _ := json.Marshal(map[string]any{"dry_run": true, "would": what, "applied": false, "hint": "re-run with --apply to execute"})
-	fmt.Println(string(b))
+	_ = output.Print(output.Format(flagOutput),
+		[]output.Column{{Key: "would", Header: "WOULD"}, {Key: "applied", Header: "APPLIED"}},
+		[]map[string]any{{"would": what, "applied": false, "dry_run": true}})
 	return false
 }
 
@@ -122,7 +118,7 @@ func init() {
 	acknowledgeCmd.Flags().BoolVar(&ackClose, "close", false, "also close the problem")
 	acknowledgeCmd.Flags().BoolVar(&ackUnack, "unacknowledge", false, "remove the acknowledgement instead")
 	acknowledgeCmd.Flags().BoolVar(&ackSuppress, "suppress", false, "suppress the problem (hide it from the problem list)")
-	acknowledgeCmd.Flags().StringVar(&ackSuppressUntil, "until", "", "with --suppress: suppress until this time (unix, RFC3339, YYYY-MM-DD, 24h, 7d); default indefinitely")
+	acknowledgeCmd.Flags().StringVar(&ackSuppressUntil, "until", "", "with --suppress: suppress until this time (unix, RFC3339, YYYY-MM-DD, or from now like 24h, 7d); default indefinitely")
 	acknowledgeCmd.Flags().BoolVar(&ackUnsuppress, "unsuppress", false, "lift a suppression")
 	acknowledgeCmd.Flags().StringVar(&ackSeverity, "severity", "", "also change the problem severity (0-5 or name)")
 }
@@ -147,7 +143,7 @@ var (
 	maintCreateGroup    string
 	maintCreateName     string
 	maintCreateStart    string
-	maintCreateDuration int
+	maintCreateDuration string
 	maintCreateDesc     string
 )
 
@@ -162,11 +158,10 @@ func init() {
 	f.StringVar(&maintCreateHost, "host", "", "host name or ID to put in maintenance")
 	f.StringVar(&maintCreateGroup, "group", "", "host group name or ID to put in maintenance")
 	f.StringVar(&maintCreateName, "name", "", "maintenance window name (required)")
-	f.StringVar(&maintCreateStart, "start", "", "start time: unix timestamp, RFC3339, or YYYY-MM-DD (required)")
-	f.IntVar(&maintCreateDuration, "duration", 0, "duration in minutes (required)")
+	f.StringVar(&maintCreateStart, "start", "now", "start time: now, unix, RFC3339, YYYY-MM-DD")
+	f.StringVar(&maintCreateDuration, "duration", "", "how long: 90 (minutes), 30m, 2h, 1d (required)")
 	f.StringVar(&maintCreateDesc, "description", "", "optional description")
 	_ = maintenanceCreateCmd.MarkFlagRequired("name")
-	_ = maintenanceCreateCmd.MarkFlagRequired("start")
 	_ = maintenanceCreateCmd.MarkFlagRequired("duration")
 }
 
@@ -187,13 +182,11 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return cliFail(outFmt, err)
 	}
-	if startTS == 0 {
-		return cliPrintErr(outFmt, "--start is required", output.ExitUsage)
+	dur, err := parseDurationFlexible(maintCreateDuration)
+	if err != nil || dur <= 0 {
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --duration %q: use minutes (90) or 30m, 2h, 1d", maintCreateDuration), output.ExitUsage)
 	}
-	if maintCreateDuration <= 0 {
-		return cliPrintErr(outFmt, "--duration must be a positive number of minutes", output.ExitUsage)
-	}
-	endTS := startTS + int64(maintCreateDuration)*60
+	endTS := startTS + int64(dur.Seconds())
 
 	p := resources.CreateMaintenanceParams{
 		Name:        maintCreateName,
@@ -226,10 +219,10 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 		p.GroupIDs = []string{g.GroupID}
 	}
 
-	prompt := fmt.Sprintf("create maintenance %q from %s for %d min?",
+	prompt := fmt.Sprintf("create maintenance %q from %s to %s?",
 		maintCreateName,
-		time.Unix(startTS, 0).UTC().Format(time.RFC3339),
-		maintCreateDuration)
+		fmtUnix(strconv.FormatInt(startTS, 10)),
+		fmtUnix(strconv.FormatInt(endTS, 10)))
 	if !confirm(prompt) {
 		return nil
 	}
@@ -756,7 +749,7 @@ func runAcknowledge(cmd *cobra.Command, args []string) error {
 	case ackSuppress:
 		p.Action, verb = resources.ActionSuppress, "suppress"
 		if ackSuppressUntil != "" {
-			ts, err := parseTimestamp(ackSuppressUntil)
+			ts, err := parseFutureTime(ackSuppressUntil)
 			if err != nil {
 				return cliFail(outFmt, err)
 			}
@@ -818,7 +811,7 @@ func newMaintenanceEndCmd(verb string) *cobra.Command {
 				}
 				by = d
 			} else {
-				ts, err := parseTimestamp(maintUntil)
+				ts, err := parseFutureTime(maintUntil)
 				if err != nil {
 					return cliFail(outFmt, err)
 				}
@@ -829,7 +822,7 @@ func newMaintenanceEndCmd(verb string) *cobra.Command {
 	}
 	c.Flags().StringVar(&maintBy, "by", "", "how much to move the end, e.g. 30m, 2h, 1d")
 	if verb == "extend" {
-		c.Flags().StringVar(&maintUntil, "until", "", "set the new end: unix, RFC3339 or YYYY-MM-DD")
+		c.Flags().StringVar(&maintUntil, "until", "", "set the new end: unix, RFC3339, YYYY-MM-DD, or relative to now like 2h")
 	}
 	addBulkFlags(c)
 	return c
@@ -837,4 +830,13 @@ func newMaintenanceEndCmd(verb string) *cobra.Command {
 
 func init() {
 	maintenanceCmd.AddCommand(newMaintenanceEndCmd("extend"), newMaintenanceEndCmd("shorten"))
+}
+
+// parseDurationFlexible reads 90 (minutes), 30m, 2h, 1d, 1w or a Go duration.
+func parseDurationFlexible(s string) (time.Duration, error) {
+	if isNumericStr(s) {
+		n, _ := strconv.Atoi(s)
+		return time.Duration(n) * time.Minute, nil
+	}
+	return parseWindow(s)
 }

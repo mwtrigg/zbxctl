@@ -194,22 +194,46 @@ func nodataPeriods(s []Sample, c Condition, from, end int64) []Period {
 // Verdict of one fired period against the real problems of the same host.
 type Verdict struct {
 	Period      Period
-	True        bool    // the real problem started within Lead after it fired, or was already running
+	True        bool    // the fire caught a real problem: before it, at its start, or while it ran
+	Timing      string  // "early", "at start" or "late" (only when True)
 	LeadMinutes float64 // minutes between the fire and the real problem's start (negative = fired late)
 	Problem     int     // index of the matched real problem, -1 when none
 }
 
+// atStart is how close to a problem's start a fire still counts as "at start".
+const atStart = 60
+
+// grace lets a fire that begins just after a problem ended still count: data
+// and events are stamped a few seconds apart.
+const grace = 120
+
 // Judge matches fired periods against real problem periods. A fire is true when
-// it starts between (problem start - lead) and the problem's end.
+// it overlaps the window from (problem start - lead) to (problem end + a short
+// grace): it came early enough, at the start, or late but while the problem
+// was still on. Problems no fire touched are reported as missed.
 func Judge(fires, real []Period, lead time.Duration) (verdicts []Verdict, missed []int) {
 	l := int64(lead.Seconds())
 	caught := make([]bool, len(real))
 	for _, f := range fires {
+		fEnd := f.End
+		if fEnd < f.Start {
+			fEnd = f.Start
+		}
 		v := Verdict{Period: f, Problem: -1}
 		for i, p := range real {
-			if f.Start >= p.Start-l && f.Start <= p.End {
+			if f.Start <= p.End+grace && fEnd >= p.Start-l {
 				v.True, v.Problem = true, i
-				v.LeadMinutes = float64(p.Start-f.Start) / 60
+				d := p.Start - f.Start
+				v.LeadMinutes = float64(d) / 60
+				switch {
+				case d > atStart:
+					v.Timing = "early"
+				case d < -atStart:
+					v.Timing = "late"
+				default:
+					v.Timing = "at start"
+					v.LeadMinutes = 0
+				}
 				caught[i] = true
 				break
 			}

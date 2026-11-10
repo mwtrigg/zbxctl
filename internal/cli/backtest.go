@@ -213,6 +213,7 @@ func runBacktest(cmd *cobra.Command, args []string) error {
 				v := verdicts[i]
 				row["verdict"] = map[bool]string{true: "true alert", false: "false alarm"}[v.True]
 				if v.True {
+					row["timing"] = v.Timing
 					row["lead_minutes"] = v.LeadMinutes
 					row["real_event_start"] = fmtT(real[v.Problem].Start)
 				}
@@ -253,7 +254,7 @@ func runBacktest(cmd *cobra.Command, args []string) error {
 	}
 	cols := []output.Column{{Key: "host", Header: "HOST"}, {Key: "key_", Header: "KEY"}, {Key: "from", Header: "FROM"}, {Key: "to", Header: "TO"}, {Key: "minutes", Header: "MINUTES"}, {Key: "peak", Header: "PEAK"}}
 	if judge {
-		cols = append(cols, output.Column{Key: "verdict", Header: "VERDICT"}, output.Column{Key: "lead_minutes", Header: "LEAD_MIN"})
+		cols = append(cols, output.Column{Key: "verdict", Header: "VERDICT"}, output.Column{Key: "timing", Header: "TIMING"}, output.Column{Key: "lead_minutes", Header: "LEAD_MIN"})
 	}
 	return output.Print(outFmt, cols, rows)
 }

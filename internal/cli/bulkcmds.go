@@ -204,6 +204,9 @@ func maintenanceEndSpec(verb string, by time.Duration, until int64) bulkSpec {
 					newTill = oldTill - int64(by.Seconds())
 				}
 			}
+			if err := resources.CheckMaintenanceEnd(m, newTill); err != nil {
+				return nil, &usageError{err.Error()}
+			}
 			if newTill == oldTill {
 				return nil, &usageError{fmt.Sprintf("maintenance %q already ends at %s", m.Name, fmtUnix(m.ActiveTill))}
 			}
@@ -243,6 +246,13 @@ func ackSpec(p resources.AcknowledgeParams, verb string) bulkSpec {
 			q.EventID = st.EventID
 			outcome := string(q.Action)
 			desc := fmt.Sprintf("%s event %s (%s)", verb, st.EventID, st.Name)
+			if q.Action == resources.ActionSuppress {
+				if q.SuppressUntil > 0 {
+					desc += " until " + fmtUnix(strconv.FormatInt(q.SuppressUntil, 10))
+				} else {
+					desc += " indefinitely"
+				}
+			}
 			// Closing only works on triggers that allow it; otherwise acknowledge instead.
 			if q.Action == resources.ActionAcknowledge && q.Close {
 				if st.Closed {

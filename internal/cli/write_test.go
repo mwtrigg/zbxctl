@@ -315,3 +315,76 @@ func TestBacktestJudgesFiresAgainstRealProblems(t *testing.T) {
 		t.Fatalf("summary %v", r)
 	}
 }
+
+func TestAllDryRunsShareOneShape(t *testing.T) {
+	extraResults = map[string]string{"hostgroup.get": `[{"groupid":"5","name":"G"}]`}
+	defer func() { extraResults = nil }()
+	for _, args := range [][]string{
+		{"disable", "host", "web1"},
+		{"create", "host", "--name", "x", "--group", "G", "--ip", "192.0.2.1"},
+	} {
+		defer resetBulkFlags()
+		out, _ := runCLI(t, args...)
+		var env struct {
+			Data []map[string]any `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(out), &env); err != nil || len(env.Data) != 1 || env.Data[0]["dry_run"] != true || env.Data[0]["applied"] != false {
+			t.Errorf("%v: dry run is not {data:[{dry_run,applied,would}]}: %q (%v)", args, out, err)
+		}
+	}
+}
+
+func TestImportSavesPreviousExportAndHonoursExpect(t *testing.T) {
+	defer resetBulkFlags()
+	defer func() { extraResults = nil; importDir = "" }()
+	extraResults = map[string]string{
+		"configuration.importcompare": `{"templates":{"updated":[{"before":{"name":"T"},"after":{"name":"T"},"items":{"updated":[{"before":{"name":"I","delay":"30s"},"after":{"name":"I","delay":"60s"}}]}}]}}`,
+		"configuration.export":        `"zabbix_export: previous"`,
+		"configuration.import":        `true`,
+		"template.get":                `[{"templateid":"7","host":"t","name":"T"}]`,
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/t.yaml", []byte("zabbix_export: new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := t.TempDir()
+	_, methods := runCLI(t, "import", "template", "--dir", dir, "--expect", "2", "--apply", "--state-dir", st)
+	if lastErr == nil || slices.Contains(methods, "configuration.import") {
+		t.Fatalf("--expect mismatch must stop before importing: err=%v", lastErr)
+	}
+	importDir = ""
+	_, methods = runCLI(t, "import", "template", "--dir", dir, "--expect", "1", "--apply", "--state-dir", st)
+	if lastErr != nil || !slices.Contains(methods, "configuration.import") {
+		t.Fatalf("err=%v methods=%v", lastErr, methods)
+	}
+	files, _ := filepath.Glob(st + "/import-template-*.json")
+	if len(files) != 1 {
+		t.Fatalf("state files: %v", files)
+	}
+	if b, _ := os.ReadFile(files[0]); !strings.Contains(string(b), "zabbix_export: previous") {
+		t.Fatalf("the previous export of the changed template must be saved: %s", b)
+	}
+	// dry run changes nothing and saves nothing
+	st2 := t.TempDir()
+	importDir = ""
+	_, methods = runCLI(t, "import", "template", "--dir", dir, "--state-dir", st2)
+	if slices.Contains(methods, "configuration.import") {
+		t.Fatal("dry run imported")
+	}
+	if f, _ := filepath.Glob(st2 + "/*.json"); len(f) != 0 {
+		t.Fatalf("dry run wrote %v", f)
+	}
+}
+
+func TestMaintenanceCreateDefaultsToNowAndAcceptsHumanDurations(t *testing.T) {
+	defer func() { extraResults = nil; maintCreateName, maintCreateHost, maintCreateDuration = "", "", "" }()
+	extraResults = map[string]string{"host.get": `[{"hostid":"10","host":"web1","name":"W","status":"0"}]`}
+	out, _ := runCLI(t, "maintenance", "create", "--name", "w", "--host", "web1", "--duration", "2h")
+	if lastErr != nil || !strings.Contains(out, "create maintenance") {
+		t.Fatalf("no --start and a 2h duration must work: err=%v out=%q", lastErr, out)
+	}
+	_, _ = runCLI(t, "maintenance", "create", "--name", "w", "--host", "web1", "--duration", "soon")
+	if lastErr == nil {
+		t.Fatal("a bad duration must be refused")
+	}
+}

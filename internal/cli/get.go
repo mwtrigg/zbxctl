@@ -61,9 +61,23 @@ func effectiveLimit(flagLimit int, ctx *config.Context) int {
 // YYYY-MM-DD date string into a Unix timestamp. Returns 0 on empty input.
 var relTimeRe = regexp.MustCompile(`^([0-9]+)([mhdw])$`)
 
+// parseFutureTime is parseTimestamp for times that lie ahead (suppress until,
+// extend until): a relative value like 7d means 7 days from now.
+func parseFutureTime(s string) (int64, error) {
+	if m := relTimeRe.FindStringSubmatch(s); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		unit := map[string]time.Duration{"m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour}[m[2]]
+		return time.Now().Add(time.Duration(n) * unit).Unix(), nil
+	}
+	return parseTimestamp(s)
+}
+
 func parseTimestamp(s string) (int64, error) {
 	if s == "" {
 		return 0, nil
+	}
+	if s == "now" {
+		return time.Now().Unix(), nil
 	}
 	// Relative: 30m, 24h, 7d, 2w mean "that long ago".
 	if m := relTimeRe.FindStringSubmatch(s); m != nil {
@@ -749,7 +763,7 @@ func init() {
 	f := getProblemsCmd.Flags()
 	f.StringVar(&getProblemsHost, "host", "", "filter by host name or ID")
 	f.StringVar(&getProblemsSeverity, "severity", "", "minimum severity: 0-5 or not_classified|information|warning|average|high|disaster")
-	f.StringVar(&getProblemsSince, "since", "", "only problems after this time (unix timestamp, RFC3339, or YYYY-MM-DD)")
+	f.StringVar(&getProblemsSince, "since", "", "only problems after this time (unix, RFC3339, YYYY-MM-DD or relative like 7d)")
 	f.StringVar(&getProblemsAcknowledged, "acknowledged", "", "filter: true=acknowledged only, false=unacknowledged only")
 	f.StringVar(&getProblemsSuppressed, "suppressed", "", "filter: true=suppressed only, false=unsuppressed only (default: both)")
 	f.BoolVar(&getProblemsMaintenance, "maintenance", false, "only problems suppressed by a maintenance window")
@@ -891,8 +905,8 @@ var getEventsCmd = &cobra.Command{
 func init() {
 	f := getEventsCmd.Flags()
 	f.StringVar(&getEventsHost, "host", "", "filter by host name or ID")
-	f.StringVar(&getEventsSince, "since", "", "events after this time (unix timestamp, RFC3339, or YYYY-MM-DD)")
-	f.StringVar(&getEventsUntil, "until", "", "events before this time (unix timestamp, RFC3339, or YYYY-MM-DD)")
+	f.StringVar(&getEventsSince, "since", "", "events after this time (unix, RFC3339, YYYY-MM-DD or relative like 7d)")
+	f.StringVar(&getEventsUntil, "until", "", "events before this time (unix, RFC3339, YYYY-MM-DD or relative like 7d)")
 	f.IntVar(&getEventsLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getEventsCmd)
 }
@@ -1268,6 +1282,7 @@ var (
 	flagHistoryUntil       string
 	flagHistoryLimit       int
 	flagHistoryAll         bool
+	flagHistoryLatest      bool
 	flagHistoryMaxRows     int
 	flagHistoryStep        string
 	flagHistoryGapsOver    string
@@ -1286,9 +1301,10 @@ func init() {
 	f.StringVar(&flagHistoryItem, "item", "", "item key pattern or numeric item ID (required)")
 	f.StringArrayVar(&flagHistoryHosts, "host", nil, "filter by host name or ID (repeatable)")
 	f.StringArrayVar(&flagHistoryGroups, "group", nil, "filter by host group name or ID (repeatable)")
-	f.StringVar(&flagHistorySince, "since", "", "start time: unix timestamp, RFC3339, or YYYY-MM-DD")
-	f.StringVar(&flagHistoryUntil, "until", "", "end time: unix timestamp, RFC3339, or YYYY-MM-DD")
+	f.StringVar(&flagHistorySince, "since", "", "start time: unix, RFC3339, YYYY-MM-DD or relative like 7d")
+	f.StringVar(&flagHistoryUntil, "until", "", "end time: unix, RFC3339, YYYY-MM-DD or relative like 7d")
 	f.IntVar(&flagHistoryLimit, "limit", 0, "max results")
+	f.BoolVar(&flagHistoryLatest, "latest", false, "with --limit: return the newest N rows instead of the oldest (output stays oldest first)")
 	f.BoolVar(&flagHistoryAll, "all", false, "page through the whole window instead of stopping at --limit")
 	f.IntVar(&flagHistoryMaxRows, "max-rows", 0, "with --all: safety cap on rows (default 200000)")
 	f.StringVar(&flagHistoryStep, "step", "", "downsample: keep the last value of each bucket of this size per item (e.g. 5m, 1h)")
@@ -1386,7 +1402,7 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 		q.ItemIDs = []string{flagHistoryItem}
 		q.KeySearch = ""
 	}
-	q.All, q.MaxRows = flagHistoryAll, flagHistoryMaxRows
+	q.All, q.MaxRows, q.Latest = flagHistoryAll, flagHistoryMaxRows, flagHistoryLatest
 	if q.All {
 		q.Limit = 0
 	}
@@ -1626,7 +1642,7 @@ func init() {
 	f := getAlertsCmd.Flags()
 	f.StringVar(&getAlertsHost, "host", "", "filter by host name or ID")
 	f.StringVar(&getAlertsEvent, "event", "", "filter by event ID")
-	f.StringVar(&getAlertsSince, "since", "", "alerts after this time: unix timestamp, RFC3339, or YYYY-MM-DD")
+	f.StringVar(&getAlertsSince, "since", "", "alerts after this time: unix, RFC3339, YYYY-MM-DD or relative like 7d")
 	f.StringVar(&getAlertsStatus, "status", "", "filter by delivery status: sent|failed")
 	f.IntVar(&getAlertsLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getAlertsCmd)
@@ -1785,13 +1801,13 @@ func suppressedUntilLabel(p resources.Problem) string {
 	return "indefinitely"
 }
 
-// normalizeProblemName replaces the problem's host names with {HOST} so the
+// normalizeProblemName replaces the problem's host names with <host> so the
 // same alert on many hosts groups together.
 func normalizeProblemName(p resources.Problem) string {
 	n := p.Name
 	for _, h := range p.Hosts {
 		if h != "" {
-			n = strings.ReplaceAll(n, h, "{HOST}")
+			n = strings.ReplaceAll(n, h, "<host>")
 		}
 	}
 	return n
