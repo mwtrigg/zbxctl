@@ -37,6 +37,12 @@ Priority: CLI flag > `ZBXCTL_*` env var (`ZBXCTL_URL`, `ZBXCTL_API_TOKEN`, `ZBXC
 
 `permissions` caps what a context may do: `readonly` blocks all writes, `operator` allows enable/disable/acknowledge/maintenance, `write` allows everything. `run script` additionally needs the script listed in the context's `allowed_scripts` and a one-time confirmation token.
 
+## Escape hatch
+
+`zbxctl api call <method> --params '{...}'` calls any Zabbix API method and prints the raw result, for the long tail that has no command. Reads (`*.get`, `configuration.export`, ...) run directly; every other method is a dry run until `--apply`, needs the write tier and saves an audit record with secrets masked. `user.login`, `token.generate`, `script.execute` and similar are refused. Prefer a dedicated command whenever one exists: it gives flat results, dry runs and checks.
+
+See [docs/api-coverage.md](docs/api-coverage.md) for what is and is not covered of the Zabbix API.
+
 ## Output and connection options
 
 `--timeout` (default 180s) bounds each API request, `--retries` (default 2) repeats read-only calls after a connection error or a 502/503/504 (writes are never retried), and `--tz America/New_York` (or `ZBXCTL_TZ`, or `local`) renders times in that zone with an explicit offset instead of UTC.
@@ -70,6 +76,7 @@ Read (never change anything):
 get hosts | host | items | latestdata | history | trends | interfaces
 get triggers | problems | events | alerts
 get discovery | lost items | lost triggers
+get proxies | proxy-groups | auditlog
 get templates | template | groups | users | user | usergroups | scripts | macros | actions
 backtest --item k --when 'avg(5m)>90'   # replay an alert idea over history/trends; judge it against real problems
 diagnose host <host>            # open problems, recent events, latest data, broken items in one call
@@ -86,6 +93,11 @@ maintenance list | create | extend | shorten | delete
 create host | update host | delete host
 tag host <host> --tag k [--value v]   untag host <host> --tag k [--value v]
 create user | delete user | create usergroup | delete usergroup
+create|update|delete group        # host groups; delete refuses groups that still have hosts
+create|update|delete item         # agent, agent-active, trapper, simple, calculated, dependent
+create|update|delete trigger      # from an expression; discovered and template objects are refused
+set macro | delete macro          # host or --global; secret values only from --value-file/--value-stdin
+update host --proxy <name|none> | --proxy-group <name>
 delete template <name> [--allow-linked]   # before-state keeps a full export
 delete lost items|triggers [--host h] [--close-problems]   # only objects that discovery lost
 import template|host <file>       # without --apply: shows the diff only

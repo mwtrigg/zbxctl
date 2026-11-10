@@ -442,6 +442,18 @@ var capabilities = []CommandSchema{
 		Examples:     []string{"zbxctl get auditlog --since 24h --action delete", "zbxctl get auditlog --resource host --search web-01 --details"},
 	},
 	{
+		Command:     "api call",
+		Description: "Escape hatch: call any Zabbix API method with JSON params and get the raw result. Use it only when no dedicated command exists. Read methods (*.get, apiinfo.version, configuration.export, configuration.importcompare) run directly; every other method is a dry run unless --apply, needs the write tier, and saves an audit record with secrets masked. Refused: user.login, user.logout, user.checkAuthentication, token.generate, script.execute.",
+		Flags: append(globalFlags(),
+			FlagSchema{Name: "params", Type: "string", Description: "Params as a JSON object or array.", Required: false, Default: ""},
+			FlagSchema{Name: "params-file", Type: "string", Description: "Read the params JSON from this file.", Required: false, Default: ""},
+			FlagSchema{Name: "params-stdin", Type: "bool", Description: "Read the params JSON from stdin.", Required: false, Default: false},
+			FlagSchema{Name: "apply", Type: "bool", Description: "Needed for any method that is not a read; without it the call is only shown (--yes is an alias).", Required: false, Default: false},
+		),
+		OutputFields: []string{"data", "meta{method,command}"},
+		Examples:     []string{"zbxctl api call proxy.get --params '{\"output\":[\"name\"]}'", "zbxctl api call host.massupdate --params-file p.json --apply"},
+	},
+	{
 		Command:     "get history",
 		Description: "Fetch time-series metric history. Resolves items from hosts/groups by key pattern, then fetches history. Use --around-event to automatically anchor the time window to a specific event. Always includes host and hostid in output.",
 		Flags: append(globalFlags(),
