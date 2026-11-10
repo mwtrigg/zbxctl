@@ -80,7 +80,8 @@ func (c Condition) compare(v float64) bool {
 // Period is a stretch of time during which the condition held.
 type Period struct {
 	Start, End int64   // End is when it stopped holding, or the window end
-	Peak       float64 // most extreme value that satisfied it (max for > / >=, min for < / <=)
+	Peak       float64 // most extreme value that satisfied it (max for > / >=, min for < / <=); for expressions, the highest value of the main item
+	Low        float64 // expressions only: the lowest value of the main item while it held
 	Open       bool    // still true at the end of the window
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -34,6 +35,9 @@ func newClient() (*api.Client, output.Format, *config.Context, error) {
 	}
 	c, err := api.NewClient(context.Background(), ctx)
 	if err != nil {
+		return nil, outFmt, nil, err
+	}
+	if err := checkServerVersion(c); err != nil {
 		return nil, outFmt, nil, err
 	}
 	for _, kv := range flagFilter {
@@ -406,6 +410,7 @@ func runGetHost(cmd *cobra.Command, args []string) error {
 		"groups":        h.GroupNames(),
 		"templates":     h.TemplateNames(),
 		"interfaces":    ifaces,
+		"monitored_by":  monitoredBy(c, h),
 		"tags":          tags,
 		"macros":        macros,
 	}
@@ -1888,4 +1893,55 @@ func printProblemGroups(outFmt output.Format, problems []resources.Problem) erro
 		})
 	}
 	return output.Print(outFmt, cols, rows)
+}
+
+// monitoredBy says what collects the host's data: the server, a proxy or a proxy group.
+func monitoredBy(c *api.Client, h *resources.Host) string {
+	switch h.MonitoredBy {
+	case "1":
+		if ps, err := resources.GetProxies(c); err == nil {
+			for _, p := range ps {
+				if p.ID == h.ProxyID {
+					return "proxy " + p.Name
+				}
+			}
+		}
+		return "proxy " + h.ProxyID
+	case "2":
+		if gs, err := resources.GetProxyGroups(c); err == nil {
+			for _, g := range gs {
+				if g.ID == h.ProxyGroupID {
+					return "proxy group " + g.Name
+				}
+			}
+		}
+		return "proxy group " + h.ProxyGroupID
+	}
+	return "server"
+}
+
+var versionWarned bool
+
+// checkServerVersion pins or detects the server version and enforces the
+// supported range: older than 7.4 is refused, newer than the tested version
+// gets a one-line warning.
+func checkServerVersion(c *api.Client) error {
+	if c.Version.IsZero() {
+		if _, err := c.DetectVersion(); err != nil {
+			return nil // unreachable or odd: the real call will report it properly
+		}
+	}
+	newer, err := c.Version.Check()
+	if err != nil {
+		if flagAllowUnsupported {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+			return nil
+		}
+		return err
+	}
+	if newer && !versionWarned {
+		versionWarned = true
+		fmt.Fprintf(os.Stderr, "warning: Zabbix %s is newer than %s, the newest version zbxctl has been tested against; some results may differ\n", c.Version, api.Tested)
+	}
+	return nil
 }

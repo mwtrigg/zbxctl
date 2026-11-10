@@ -15,17 +15,18 @@ import (
 )
 
 var (
-	flagOutput   string
-	flagContext  string
-	flagYes      bool
-	flagApply    bool
-	flagFilter   []string
-	flagField    string
-	flagInsecure bool
-	flagRaw      bool
-	flagTimeout  time.Duration
-	flagRetries  int
-	flagTZ       string
+	flagOutput           string
+	flagContext          string
+	flagYes              bool
+	flagApply            bool
+	flagFilter           []string
+	flagField            string
+	flagInsecure         bool
+	flagRaw              bool
+	flagTimeout          time.Duration
+	flagRetries          int
+	flagTZ               string
+	flagAllowUnsupported bool
 )
 
 // cliErr is a sentinel error that carries a desired process exit code.
@@ -75,7 +76,10 @@ func classify(err error) int {
 	var ue *usageError
 	var rpc *api.RPCError
 	var fe *output.FieldError
+	var uv *api.UnsupportedVersionError
 	switch {
+	case errors.As(err, &uv):
+		return output.ExitVersion
 	case errors.As(err, &fe):
 		return output.ExitUsage
 	case isCobraUsage(err):
@@ -140,6 +144,7 @@ func init() {
 	rootCmd.PersistentFlags().DurationVar(&flagTimeout, "timeout", 180*time.Second, "timeout of each API request")
 	rootCmd.PersistentFlags().IntVar(&flagRetries, "retries", 2, "retries of read-only calls after a connection error or 502/503/504 (writes are never retried)")
 	rootCmd.PersistentFlags().StringVar(&flagTZ, "tz", os.Getenv("ZBXCTL_TZ"), "time zone for displayed times: an IANA name like America/New_York, or local (default UTC)")
+	rootCmd.PersistentFlags().BoolVar(&flagAllowUnsupported, "allow-unsupported", os.Getenv("ZBXCTL_ALLOW_UNSUPPORTED") != "", "try a Zabbix server older than zbxctl supports (7.4)")
 	rootCmd.PersistentFlags().BoolVar(&flagRaw, "raw", false,
 		"include raw API values (*_raw, *_unix) next to the readable ones")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure",

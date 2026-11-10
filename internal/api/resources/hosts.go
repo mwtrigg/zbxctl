@@ -11,12 +11,15 @@ import (
 
 // Host represents a Zabbix host object.
 type Host struct {
-	HostID      string `json:"hostid"`
-	Host        string `json:"host"`      // technical name
-	Name        string `json:"name"`      // visible name
-	Status      string `json:"status"`    // "0"=monitored, "1"=unmonitored
-	Available   string `json:"available"` // "0"=unknown, "1"=available, "2"=unavailable
-	Description string `json:"description"`
+	HostID       string `json:"hostid"`
+	Host         string `json:"host"`      // technical name
+	Name         string `json:"name"`      // visible name
+	Status       string `json:"status"`    // "0"=monitored, "1"=unmonitored
+	Available    string `json:"available"` // "0"=unknown, "1"=available, "2"=unavailable
+	Description  string `json:"description"`
+	MonitoredBy  string `json:"monitored_by"` // "0" server, "1" proxy, "2" proxy group
+	ProxyID      string `json:"proxyid"`
+	ProxyGroupID string `json:"proxy_groupid"`
 
 	// Populated via select* parameters (see hostSelects).
 	HostGroups      []NamedRef  `json:"hostgroups"`
@@ -151,7 +154,7 @@ func GetHosts(c *api.Client, f HostFilter) ([]Host, error) {
 // GetHost returns a single host by numeric ID, technical name, or visible name.
 // Lookup order: numeric ID → technical name (host field) → visible name (name field).
 func GetHost(c *api.Client, idOrName string) (*Host, error) {
-	outputFields := []string{"hostid", "host", "name", "status", "description"}
+	outputFields := []string{"hostid", "host", "name", "status", "description", "monitored_by", "proxyid", "proxy_groupid"}
 
 	if isNumeric(idOrName) {
 		return hostGetOne(c, outputFields, map[string]any{
@@ -379,6 +382,11 @@ type UpdateHostInput struct {
 	RemoveGroupIDs    []string // resolved groupids to remove
 	AddTemplateIDs    []string // resolved templateids to link
 	RemoveTemplateIDs []string // resolved templateids to unlink
+
+	// Monitoring source: "" leave alone, "server", "proxy" (ProxyID) or "group" (ProxyGroupID).
+	MonitoredBy  string
+	ProxyID      string
+	ProxyGroupID string
 }
 
 // UpdateHost fetches current groups/templates, applies diffs, and calls host.update.
@@ -465,6 +473,15 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 			}
 			updateParams["templates_clear"] = clear
 		}
+	}
+
+	switch in.MonitoredBy {
+	case "server":
+		updateParams["monitored_by"] = 0
+	case "proxy":
+		updateParams["monitored_by"], updateParams["proxyid"] = 1, in.ProxyID
+	case "group":
+		updateParams["monitored_by"], updateParams["proxy_groupid"] = 2, in.ProxyGroupID
 	}
 
 	_, err = c.Call("host.update", updateParams)
