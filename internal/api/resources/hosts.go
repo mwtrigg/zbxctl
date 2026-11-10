@@ -381,7 +381,8 @@ type UpdateHostInput struct {
 	AddGroupIDs       []string // resolved groupids to add
 	RemoveGroupIDs    []string // resolved groupids to remove
 	AddTemplateIDs    []string // resolved templateids to link
-	RemoveTemplateIDs []string // resolved templateids to unlink
+	RemoveTemplateIDs []string // resolved templateids to unlink; the items, triggers and graphs they gave the host stay
+	ClearTemplateIDs  []string // resolved templateids to unlink AND clear: deletes those items, triggers, graphs and their history
 
 	// Monitoring source: "" leave alone, "server", "proxy" (ProxyID) or "group" (ProxyGroupID).
 	MonitoredBy  string
@@ -441,6 +442,9 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 	for _, id := range in.RemoveTemplateIDs {
 		delete(tmplSet, id)
 	}
+	for _, id := range in.ClearTemplateIDs {
+		delete(tmplSet, id)
+	}
 
 	// Build update payload.
 	updateParams := map[string]any{"hostid": in.HostID}
@@ -460,15 +464,17 @@ func UpdateHost(c *api.Client, in UpdateHostInput) (*Host, error) {
 		}
 		updateParams["groups"] = groups
 	}
-	if len(in.AddTemplateIDs) > 0 || len(in.RemoveTemplateIDs) > 0 {
+	if len(in.AddTemplateIDs) > 0 || len(in.RemoveTemplateIDs) > 0 || len(in.ClearTemplateIDs) > 0 {
 		tmpls := make([]map[string]string, 0, len(tmplSet))
 		for id := range tmplSet {
 			tmpls = append(tmpls, map[string]string{"templateid": id})
 		}
 		updateParams["templates"] = tmpls
-		if len(in.RemoveTemplateIDs) > 0 {
-			clear := make([]map[string]string, len(in.RemoveTemplateIDs))
-			for i, id := range in.RemoveTemplateIDs {
+		// templates_clear unlinks and deletes what the template gave the host, so it
+		// is sent only for templates the caller asked to clear.
+		if len(in.ClearTemplateIDs) > 0 {
+			clear := make([]map[string]string, len(in.ClearTemplateIDs))
+			for i, id := range in.ClearTemplateIDs {
 				clear[i] = map[string]string{"templateid": id}
 			}
 			updateParams["templates_clear"] = clear
@@ -501,4 +507,33 @@ func DeleteHost(c *api.Client, hostID string) (*Host, error) {
 		return nil, fmt.Errorf("host.delete: %w", err)
 	}
 	return h, nil
+}
+
+// HostLinkIDs returns the IDs of the groups a host belongs to and the templates
+// linked to it, for checking a change after it was made.
+func HostLinkIDs(c *api.Client, hostID string) (groups, templates []string, err error) {
+	raw, err := c.Call("host.get", map[string]any{
+		"output": []string{"hostid"}, "hostids": []string{hostID},
+		"selectHostGroups": []string{"groupid"}, "selectParentTemplates": []string{"templateid"},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("host.get: %w", err)
+	}
+	var hosts []struct {
+		Groups    []map[string]string `json:"hostgroups"`
+		Templates []map[string]string `json:"parentTemplates"`
+	}
+	if err := json.Unmarshal(raw, &hosts); err != nil {
+		return nil, nil, fmt.Errorf("parsing host: %w", err)
+	}
+	if len(hosts) == 0 {
+		return nil, nil, &NotFoundError{Resource: "host", Query: hostID}
+	}
+	for _, g := range hosts[0].Groups {
+		groups = append(groups, g["groupid"])
+	}
+	for _, t := range hosts[0].Templates {
+		templates = append(templates, t["templateid"])
+	}
+	return groups, templates, nil
 }

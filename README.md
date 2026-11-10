@@ -99,6 +99,7 @@ There is deliberately no automatic restore: too much can go subtly wrong (a dele
 | `suppress` / `unsuppress` | the event | the opposite verb (an earlier suppression time is not recorded) |
 | `maintenance extend` / `shorten` | the end time before | `maintenance extend\|shorten --until <the old end>` |
 | `maintenance delete` | name, start, end, hosts, groups | `maintenance create` with those values |
+| `update host` | name, description, groups, templates (names and IDs), monitoring source | `update host` with the old values; `--clear-template` also deletes items and history, which no file can bring back |
 | `delete host` | groups, templates, tags, interfaces, macros | `create host`, then `update host` and `set macro`; history is gone |
 | `delete template` | the full yaml export | save `export_yaml` to a file, then `import template <file> --apply` |
 | `import template\|host` | the previous yaml export of every object it changed | import that yaml again (objects the import created are not recorded) |
@@ -133,7 +134,7 @@ create | update | delete   host | group | item | trigger | valuemap | regexp
 create | delete   user | usergroup
 set macro | delete macro        (host or --global)
 tag host | untag host
-update host --proxy <name|none> | --proxy-group <name>
+update host --proxy <name|none> | --proxy-group <name> | --add-template | --remove-template (unlink; items stay) | --clear-template (unlink and delete what it gave the host)
 export | diff | import   template | host
 delete template | delete lost items | delete lost triggers
 run script <name> --host <host>        (allowlist and confirmation code required)

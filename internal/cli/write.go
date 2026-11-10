@@ -365,6 +365,7 @@ var (
 	flagUpdateHostRemoveGroups    []string
 	flagUpdateHostAddTemplates    []string
 	flagUpdateHostRemoveTemplates []string
+	flagUpdateHostClearTemplates  []string
 	flagUpdateHostProxy           string
 	flagUpdateHostProxyGroup      string
 )
@@ -378,9 +379,9 @@ var createHostCmd = &cobra.Command{
 
 var updateCmd = &cobra.Command{Use: "update", Short: "Update resources"}
 var updateHostCmd = &cobra.Command{
-	Use:   "host <id|name>",
-	Short: "Update a Zabbix host",
-	Args:  cobra.ExactArgs(1),
+	Use:   "host <id|name>...",
+	Short: "Update one or more Zabbix hosts",
+	Args:  cobra.ArbitraryArgs,
 	RunE:  runUpdateHost,
 }
 
@@ -414,9 +415,11 @@ func init() {
 	g.StringArrayVar(&flagUpdateHostAddGroups, "add-group", nil, "host group to add (repeatable)")
 	g.StringArrayVar(&flagUpdateHostRemoveGroups, "remove-group", nil, "host group to remove (repeatable)")
 	g.StringArrayVar(&flagUpdateHostAddTemplates, "add-template", nil, "template to link (repeatable)")
-	g.StringArrayVar(&flagUpdateHostRemoveTemplates, "remove-template", nil, "template to unlink (repeatable)")
+	g.StringArrayVar(&flagUpdateHostRemoveTemplates, "remove-template", nil, "template to unlink; the items, triggers and graphs it gave the host stay (repeatable)")
+	g.StringArrayVar(&flagUpdateHostClearTemplates, "clear-template", nil, "template to unlink AND clear: deletes the items, triggers, graphs and history it gave the host, which cannot be undone (repeatable)")
 	g.StringVar(&flagUpdateHostProxy, "proxy", "", "monitor the host through this proxy (name or ID), or none to monitor it from the server")
 	g.StringVar(&flagUpdateHostProxyGroup, "proxy-group", "", "monitor the host through this proxy group (name or ID)")
+	addBulkFlags(updateHostCmd)
 	updateCmd.AddCommand(updateHostCmd)
 
 	deleteCmd.AddCommand(deleteHostCmd)
@@ -481,104 +484,6 @@ func runCreateHost(_ *cobra.Command, _ []string) error {
 
 	if outFmt == output.FormatTable {
 		fmt.Printf("created host %s (id: %s)\n", host.Host, host.HostID)
-		return nil
-	}
-	return printWriteResult(outFmt, map[string]any{
-		"hostid": host.HostID,
-		"host":   host.Host,
-		"name":   host.Name,
-		"status": hostStatusLabel(host.Status),
-	})
-}
-
-func runUpdateHost(_ *cobra.Command, args []string) error {
-	c, outFmt, ctx, err := writeClient()
-	if err != nil {
-		return cliFail(output.Format(flagOutput), err)
-	}
-	if err := ctx.CheckPermission("write"); err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	if flagUpdateHostVisibleName == "" && flagUpdateHostDescription == "" &&
-		len(flagUpdateHostAddGroups) == 0 && len(flagUpdateHostRemoveGroups) == 0 &&
-		len(flagUpdateHostAddTemplates) == 0 && len(flagUpdateHostRemoveTemplates) == 0 &&
-		flagUpdateHostProxy == "" && flagUpdateHostProxyGroup == "" {
-		return cliPrintErr(outFmt, "no update flags provided; nothing to do", output.ExitError)
-	}
-
-	hostID, err := resources.ResolveHostID(c, args[0])
-	if err != nil {
-		return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
-	}
-
-	in := resources.UpdateHostInput{
-		HostID:      hostID,
-		VisibleName: flagUpdateHostVisibleName,
-		Description: flagUpdateHostDescription,
-	}
-
-	for _, grp := range flagUpdateHostAddGroups {
-		id, err := resources.ResolveGroupID(c, grp)
-		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", grp, err), output.ExitNotFound)
-		}
-		in.AddGroupIDs = append(in.AddGroupIDs, id)
-	}
-	for _, grp := range flagUpdateHostRemoveGroups {
-		id, err := resources.ResolveGroupID(c, grp)
-		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", grp, err), output.ExitNotFound)
-		}
-		in.RemoveGroupIDs = append(in.RemoveGroupIDs, id)
-	}
-	for _, t := range flagUpdateHostAddTemplates {
-		id, err := resources.ResolveTemplateID(c, t)
-		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("template %q: %s", t, err), output.ExitNotFound)
-		}
-		in.AddTemplateIDs = append(in.AddTemplateIDs, id)
-	}
-	for _, t := range flagUpdateHostRemoveTemplates {
-		id, err := resources.ResolveTemplateID(c, t)
-		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("template %q: %s", t, err), output.ExitNotFound)
-		}
-		in.RemoveTemplateIDs = append(in.RemoveTemplateIDs, id)
-	}
-
-	if flagUpdateHostProxy != "" && flagUpdateHostProxyGroup != "" {
-		return cliPrintErr(outFmt, "--proxy and --proxy-group are exclusive", output.ExitUsage)
-	}
-	what := ""
-	switch {
-	case flagUpdateHostProxy == "none":
-		in.MonitoredBy, what = "server", ", monitored by the server"
-	case flagUpdateHostProxy != "":
-		id, err := resources.ResolveProxyID(c, flagUpdateHostProxy)
-		if err != nil {
-			return cliFail(outFmt, err)
-		}
-		in.MonitoredBy, in.ProxyID, what = "proxy", id, fmt.Sprintf(", monitored by proxy %q", flagUpdateHostProxy)
-	case flagUpdateHostProxyGroup != "":
-		id, err := resources.ResolveProxyGroupID(c, flagUpdateHostProxyGroup)
-		if err != nil {
-			return cliFail(outFmt, err)
-		}
-		in.MonitoredBy, in.ProxyGroupID, what = "group", id, fmt.Sprintf(", monitored by proxy group %q", flagUpdateHostProxyGroup)
-	}
-
-	if !confirm(fmt.Sprintf("update host %q%s?", args[0], what)) {
-		return nil
-	}
-
-	host, err := resources.UpdateHost(c, in)
-	if err != nil {
-		return cliFail(outFmt, err)
-	}
-
-	if outFmt == output.FormatTable {
-		fmt.Printf("updated host %s (id: %s)\n", host.Host, host.HostID)
 		return nil
 	}
 	return printWriteResult(outFmt, map[string]any{

@@ -215,10 +215,19 @@ func TestChildRefusesFlagsTheServerNeverOffers(t *testing.T) {
 	}
 }
 
-// runChildArgs runs the command tree the way an MCP child would see it. Flag
-// state is global in these tests, so it is cleared first; the policy check runs
-// before any network call, so no server is needed.
+// runChildArgs runs the command tree the way an MCP child would see it; the
+// policy check runs before any network call, so no server is needed.
 func runChildArgs(args ...string) error {
+	clearFlagState()
+	defer clearFlagState()
+	rootCmd.SetArgs(args)
+	defer rootCmd.SetArgs(nil)
+	return rootCmd.Execute()
+}
+
+// clearFlagState puts every flag back to its default. Flag state is global in
+// these tests, so a command run earlier must not leak into the next one.
+func clearFlagState() {
 	var clear func(c *cobra.Command)
 	clear = func(c *cobra.Command) {
 		for _, fs := range []*pflag.FlagSet{c.Flags(), c.PersistentFlags()} {
@@ -236,8 +245,4 @@ func runChildArgs(args ...string) error {
 		}
 	}
 	clear(rootCmd)
-	defer clear(rootCmd)
-	rootCmd.SetArgs(args)
-	defer rootCmd.SetArgs(nil)
-	return rootCmd.Execute()
 }
