@@ -449,3 +449,35 @@ func TestCreateItemNeedsDelayAndKnownType(t *testing.T) {
 		t.Fatalf("agent item without --delay: %v", lastErr)
 	}
 }
+
+func TestAPICallGuards(t *testing.T) {
+	defer func() { extraResults = nil; apiParams = "" }()
+	extraResults = map[string]string{"proxy.get": `[{"name":"p1"}]`, "host.massupdate": `{"hostids":["1"]}`}
+
+	out, methods := runCLI(t, "api", "call", "proxy.get", "--params", `{"output":["name"]}`)
+	if lastErr != nil || !slices.Contains(methods, "proxy.get") || !strings.Contains(out, `"p1"`) {
+		t.Fatalf("reads run directly: err=%v out=%q", lastErr, out)
+	}
+	for _, denied := range []string{"user.login", "token.generate", "script.execute", "user.checkAuthentication"} {
+		_, methods = runCLI(t, "api", "call", denied)
+		if lastErr == nil || slices.Contains(methods, denied) {
+			t.Errorf("%s must be refused", denied)
+		}
+	}
+	out, methods = runCLI(t, "api", "call", "host.massupdate", "--params", `{"hosts":[{"hostid":"1"}],"passwd":"hunter2"}`)
+	if slices.Contains(methods, "host.massupdate") || strings.Contains(out, "hunter2") || !strings.Contains(out, "******") {
+		t.Fatalf("a write must be a dry run with secrets masked: methods=%v out=%q", methods, out)
+	}
+	_, methods = runCLI(t, "api", "call", "host.massupdate", "--params", `{"hosts":[{"hostid":"1"}]}`, "--apply", "--state-dir", t.TempDir())
+	if lastErr != nil || !slices.Contains(methods, "host.massupdate") {
+		t.Fatalf("--apply runs it: err=%v", lastErr)
+	}
+	_, _ = runCLI(t, "api", "call", "not a method")
+	if lastErr == nil {
+		t.Fatal("malformed method names must be refused")
+	}
+	_, _ = runCLI(t, "api", "call", "host.get", "--params", `not json`)
+	if lastErr == nil {
+		t.Fatal("bad JSON must be refused")
+	}
+}
