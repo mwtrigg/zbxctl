@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -60,9 +61,23 @@ func effectiveLimit(flagLimit int, ctx *config.Context) int {
 // YYYY-MM-DD date string into a Unix timestamp. Returns 0 on empty input.
 var relTimeRe = regexp.MustCompile(`^([0-9]+)([mhdw])$`)
 
+// parseFutureTime is parseTimestamp for times that lie ahead (suppress until,
+// extend until): a relative value like 7d means 7 days from now.
+func parseFutureTime(s string) (int64, error) {
+	if m := relTimeRe.FindStringSubmatch(s); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		unit := map[string]time.Duration{"m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour}[m[2]]
+		return time.Now().Add(time.Duration(n) * unit).Unix(), nil
+	}
+	return parseTimestamp(s)
+}
+
 func parseTimestamp(s string) (int64, error) {
 	if s == "" {
 		return 0, nil
+	}
+	if s == "now" {
+		return time.Now().Unix(), nil
 	}
 	// Relative: 30m, 24h, 7d, 2w mean "that long ago".
 	if m := relTimeRe.FindStringSubmatch(s); m != nil {
@@ -95,7 +110,29 @@ func fmtUnix(s string) string {
 	if err != nil {
 		return s
 	}
-	return time.Unix(n, 0).UTC().Format(time.RFC3339)
+	return time.Unix(n, 0).In(displayLoc).Format(time.RFC3339)
+}
+
+// displayLoc is the zone times are rendered in. Zabbix stores UTC epochs; the
+// offset in the output makes every time unambiguous, DST days included.
+var displayLoc = time.UTC
+
+// setDisplayZone applies --tz: "" or UTC, "local", or an IANA zone name.
+func setDisplayZone(name string) error {
+	switch strings.ToLower(name) {
+	case "", "utc":
+		displayLoc = time.UTC
+	case "local":
+		displayLoc = time.Local
+	default:
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			displayLoc = time.UTC
+			return fmt.Errorf("unknown time zone %q, showing UTC", name)
+		}
+		displayLoc = loc
+	}
+	return nil
 }
 
 // hostStatusLabel converts a Zabbix status string to a human-readable label.
@@ -599,6 +636,7 @@ var (
 	getTriggersStatus   string
 	getTriggersProblem  bool
 	getTriggersLimit    int
+	getTriggersSearch   string
 	getTriggersSortBy   string
 )
 
@@ -615,6 +653,7 @@ func init() {
 	f.StringVar(&getTriggersStatus, "status", "", "filter by status: enabled|disabled")
 	f.BoolVar(&getTriggersProblem, "problem", false, "only show triggers currently in PROBLEM state")
 	f.IntVar(&getTriggersLimit, "limit", 0, "max results")
+	f.StringVar(&getTriggersSearch, "search", "", "substring match on the trigger description")
 	f.StringVar(&getTriggersSortBy, "sort-by", "priority", "sort field: priority|lastchange|description")
 	getCmd.AddCommand(getTriggersCmd)
 }
@@ -628,6 +667,7 @@ func runGetTriggers(cmd *cobra.Command, args []string) error {
 	filter := resources.TriggerFilter{
 		SortField:    getTriggersSortBy,
 		Limit:        effectiveLimit(getTriggersLimit, ctx),
+		Search:       getTriggersSearch,
 		OnlyProblems: getTriggersProblem,
 	}
 
@@ -705,6 +745,10 @@ var (
 	getProblemsSeverity     string
 	getProblemsSince        string
 	getProblemsAcknowledged string
+	getProblemsSuppressed   string
+	getProblemsMaintenance  bool
+	getProblemsNoOrphans    bool
+	getProblemsGroupBy      string
 	getProblemsResolved     bool
 	getProblemsLimit        int
 )
@@ -719,8 +763,12 @@ func init() {
 	f := getProblemsCmd.Flags()
 	f.StringVar(&getProblemsHost, "host", "", "filter by host name or ID")
 	f.StringVar(&getProblemsSeverity, "severity", "", "minimum severity: 0-5 or not_classified|information|warning|average|high|disaster")
-	f.StringVar(&getProblemsSince, "since", "", "only problems after this time (unix timestamp, RFC3339, or YYYY-MM-DD)")
+	f.StringVar(&getProblemsSince, "since", "", "only problems after this time (unix, RFC3339, YYYY-MM-DD or relative like 7d)")
 	f.StringVar(&getProblemsAcknowledged, "acknowledged", "", "filter: true=acknowledged only, false=unacknowledged only")
+	f.StringVar(&getProblemsSuppressed, "suppressed", "", "filter: true=suppressed only, false=unsuppressed only (default: both)")
+	f.BoolVar(&getProblemsMaintenance, "maintenance", false, "only problems suppressed by a maintenance window")
+	f.BoolVar(&getProblemsNoOrphans, "exclude-orphans", false, "drop problems that can never recover (trigger, host or items disabled)")
+	f.StringVar(&getProblemsGroupBy, "group-by", "", "group identical alerts across hosts: name")
 	f.BoolVar(&getProblemsResolved, "resolved", false, "include recently-resolved problems (default: open only)")
 	f.IntVar(&getProblemsLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getProblemsCmd)
@@ -775,9 +823,25 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 		filter.Acknowledged = &b
 	}
 
+	if getProblemsSuppressed != "" {
+		b, err := strconv.ParseBool(getProblemsSuppressed)
+		if err != nil {
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --suppressed %q: use true or false", getProblemsSuppressed), output.ExitUsage)
+		}
+		filter.Suppressed = &b
+	}
+	filter.Maintenance = getProblemsMaintenance
+	filter.NoOrphans = getProblemsNoOrphans
+	if getProblemsGroupBy != "" && getProblemsGroupBy != "name" {
+		return cliPrintErr(outFmt, fmt.Sprintf("invalid --group-by %q: use name", getProblemsGroupBy), output.ExitUsage)
+	}
+
 	problems, err := resources.GetProblems(c, filter)
 	if err != nil {
 		return cliFail(outFmt, err)
+	}
+	if getProblemsGroupBy == "name" {
+		return printProblemGroups(outFmt, problems)
 	}
 
 	cols := []output.Column{
@@ -787,6 +851,8 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 		{Key: "severity", Header: "SEVERITY"},
 		{Key: "status", Header: "STATUS"},
 		{Key: "acknowledged", Header: "ACK"},
+		{Key: "suppressed", Header: "SUPPRESSED"},
+		{Key: "orphan", Header: "ORPHAN"},
 		{Key: "clock", Header: "OPENED"},
 		{Key: "r_clock", Header: "RESOLVED"},
 	}
@@ -807,6 +873,10 @@ func runGetProblems(cmd *cobra.Command, args []string) error {
 			"status":           statusLabel,
 			"acknowledged":     acknowledgedLabel(p.Acknowledged),
 			"acknowledged_raw": p.Acknowledged,
+			"suppressed":       p.IsSuppressed(),
+			"maintenance":      p.MaintenanceSuppressed(),
+			"suppressed_until": suppressedUntilLabel(p),
+			"orphan":           p.Orphan,
 			"clock":            fmtUnix(p.Clock),
 			"clock_unix":       p.Clock,
 			"r_eventid":        p.RecoveryEventID,
@@ -835,8 +905,8 @@ var getEventsCmd = &cobra.Command{
 func init() {
 	f := getEventsCmd.Flags()
 	f.StringVar(&getEventsHost, "host", "", "filter by host name or ID")
-	f.StringVar(&getEventsSince, "since", "", "events after this time (unix timestamp, RFC3339, or YYYY-MM-DD)")
-	f.StringVar(&getEventsUntil, "until", "", "events before this time (unix timestamp, RFC3339, or YYYY-MM-DD)")
+	f.StringVar(&getEventsSince, "since", "", "events after this time (unix, RFC3339, YYYY-MM-DD or relative like 7d)")
+	f.StringVar(&getEventsUntil, "until", "", "events before this time (unix, RFC3339, YYYY-MM-DD or relative like 7d)")
 	f.IntVar(&getEventsLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getEventsCmd)
 }
@@ -1211,6 +1281,11 @@ var (
 	flagHistorySince       string
 	flagHistoryUntil       string
 	flagHistoryLimit       int
+	flagHistoryAll         bool
+	flagHistoryLatest      bool
+	flagHistoryMaxRows     int
+	flagHistoryStep        string
+	flagHistoryGapsOver    string
 	flagHistoryAroundEvent string
 	flagHistoryWindow      string
 )
@@ -1226,9 +1301,14 @@ func init() {
 	f.StringVar(&flagHistoryItem, "item", "", "item key pattern or numeric item ID (required)")
 	f.StringArrayVar(&flagHistoryHosts, "host", nil, "filter by host name or ID (repeatable)")
 	f.StringArrayVar(&flagHistoryGroups, "group", nil, "filter by host group name or ID (repeatable)")
-	f.StringVar(&flagHistorySince, "since", "", "start time: unix timestamp, RFC3339, or YYYY-MM-DD")
-	f.StringVar(&flagHistoryUntil, "until", "", "end time: unix timestamp, RFC3339, or YYYY-MM-DD")
+	f.StringVar(&flagHistorySince, "since", "", "start time: unix, RFC3339, YYYY-MM-DD or relative like 7d")
+	f.StringVar(&flagHistoryUntil, "until", "", "end time: unix, RFC3339, YYYY-MM-DD or relative like 7d")
 	f.IntVar(&flagHistoryLimit, "limit", 0, "max results")
+	f.BoolVar(&flagHistoryLatest, "latest", false, "with --limit: return the newest N rows instead of the oldest (output stays oldest first)")
+	f.BoolVar(&flagHistoryAll, "all", false, "page through the whole window instead of stopping at --limit")
+	f.IntVar(&flagHistoryMaxRows, "max-rows", 0, "with --all: safety cap on rows (default 200000)")
+	f.StringVar(&flagHistoryStep, "step", "", "downsample: keep the last value of each bucket of this size per item (e.g. 5m, 1h)")
+	f.StringVar(&flagHistoryGapsOver, "gaps-over", "", "report gaps between consecutive samples longer than this (e.g. 10m) instead of the samples")
 	f.StringVar(&flagHistoryAroundEvent, "around-event", "", "anchor query to this event ID (resolves host, centers window on event clock)")
 	f.StringVar(&flagHistoryWindow, "window", "1h", "time window for --around-event: 30m|1h|2h|6h")
 	getCmd.AddCommand(historyCmd)
@@ -1322,6 +1402,23 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 		q.ItemIDs = []string{flagHistoryItem}
 		q.KeySearch = ""
 	}
+	q.All, q.MaxRows, q.Latest = flagHistoryAll, flagHistoryMaxRows, flagHistoryLatest
+	if q.All {
+		q.Limit = 0
+	}
+	var step, gapsOver time.Duration
+	if flagHistoryStep != "" {
+		if step, err = parseWindow(flagHistoryStep); err != nil || step <= 0 {
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --step %q: use a duration like 5m, 1h", flagHistoryStep), output.ExitUsage)
+		}
+	}
+	if flagHistoryGapsOver != "" {
+		if gapsOver, err = parseWindow(flagHistoryGapsOver); err != nil || gapsOver <= 0 {
+			return cliPrintErr(outFmt, fmt.Sprintf("invalid --gaps-over %q: use a duration like 10m", flagHistoryGapsOver), output.ExitUsage)
+		}
+		q.All = true // gap detection needs every sample
+		q.Limit = 0
+	}
 
 	records, err := resources.GetHistory(c, q)
 	if err != nil {
@@ -1330,6 +1427,12 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 			return cliPrintErr(outFmt, err.Error(), output.ExitNotFound)
 		}
 		return cliFail(outFmt, err)
+	}
+	if gapsOver > 0 {
+		return printHistoryGaps(outFmt, records, gapsOver, since, until)
+	}
+	if step > 0 {
+		records = downsampleHistory(records, step)
 	}
 
 	cols := []output.Column{
@@ -1539,7 +1642,7 @@ func init() {
 	f := getAlertsCmd.Flags()
 	f.StringVar(&getAlertsHost, "host", "", "filter by host name or ID")
 	f.StringVar(&getAlertsEvent, "event", "", "filter by event ID")
-	f.StringVar(&getAlertsSince, "since", "", "alerts after this time: unix timestamp, RFC3339, or YYYY-MM-DD")
+	f.StringVar(&getAlertsSince, "since", "", "alerts after this time: unix, RFC3339, YYYY-MM-DD or relative like 7d")
 	f.StringVar(&getAlertsStatus, "status", "", "filter by delivery status: sent|failed")
 	f.IntVar(&getAlertsLimit, "limit", 0, "max results")
 	getCmd.AddCommand(getAlertsCmd)
@@ -1684,6 +1787,105 @@ func runGetInterfaces(_ *cobra.Command, args []string) error {
 			"snmp_community":    iface.SNMPCommunity,
 			"snmp_securityname": iface.SNMPSecurityName,
 		}
+	}
+	return output.Print(outFmt, cols, rows)
+}
+
+func suppressedUntilLabel(p resources.Problem) string {
+	if !p.IsSuppressed() {
+		return ""
+	}
+	if u := p.SuppressedUntil(); u != "" && u != "0" {
+		return fmtUnix(u)
+	}
+	return "indefinitely"
+}
+
+// normalizeProblemName replaces the problem's host names with <host> so the
+// same alert on many hosts groups together.
+func normalizeProblemName(p resources.Problem) string {
+	n := p.Name
+	for _, h := range p.Hosts {
+		if h != "" {
+			n = strings.ReplaceAll(n, h, "<host>")
+		}
+	}
+	return n
+}
+
+// printProblemGroups prints one row per (normalized name, severity).
+func printProblemGroups(outFmt output.Format, problems []resources.Problem) error {
+	type group struct {
+		name, severity     string
+		count, acked, supp int
+		hosts              map[string]bool
+		first, last        int64
+		eventIDs           []string
+		orphans            map[string]bool
+	}
+	order := []string{}
+	groups := map[string]*group{}
+	for _, p := range problems {
+		name := normalizeProblemName(p)
+		key := p.Severity + "\x00" + name
+		g := groups[key]
+		if g == nil {
+			g = &group{name: name, severity: p.Severity, hosts: map[string]bool{}, orphans: map[string]bool{}}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.count++
+		if p.Acknowledged == "1" {
+			g.acked++
+		}
+		if p.IsSuppressed() {
+			g.supp++
+		}
+		for _, h := range p.Hosts {
+			g.hosts[h] = true
+		}
+		if p.Orphan != "" {
+			g.orphans[p.Orphan] = true
+		}
+		ts, _ := strconv.ParseInt(p.Clock, 10, 64)
+		if g.first == 0 || ts < g.first {
+			g.first = ts
+		}
+		if ts > g.last {
+			g.last = ts
+		}
+		g.eventIDs = append(g.eventIDs, p.EventID)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := groups[order[i]], groups[order[j]]
+		if a.severity != b.severity {
+			return a.severity > b.severity
+		}
+		return a.count > b.count
+	})
+	cols := []output.Column{
+		{Key: "count", Header: "COUNT"}, {Key: "severity", Header: "SEVERITY"}, {Key: "name", Header: "NAME"},
+		{Key: "hosts", Header: "HOSTS"}, {Key: "acknowledged", Header: "ACKED"}, {Key: "suppressed", Header: "SUPPRESSED"}, {Key: "last", Header: "LAST"},
+	}
+	rows := make([]map[string]any, 0, len(order))
+	for _, k := range order {
+		g := groups[k]
+		hosts := make([]string, 0, len(g.hosts))
+		for h := range g.hosts {
+			hosts = append(hosts, h)
+		}
+		sort.Strings(hosts)
+		orphans := make([]string, 0, len(g.orphans))
+		for o := range g.orphans {
+			orphans = append(orphans, o)
+		}
+		sort.Strings(orphans)
+		rows = append(rows, map[string]any{
+			"count": g.count, "severity": severityLabel(g.severity), "name": g.name, "hosts": hosts,
+			"acknowledged": g.acked, "suppressed": g.supp, "orphans": orphans,
+			"first": fmtUnix(strconv.FormatInt(g.first, 10)), "last": fmtUnix(strconv.FormatInt(g.last, 10)),
+			"eventids": g.eventIDs,
+		})
 	}
 	return output.Print(outFmt, cols, rows)
 }

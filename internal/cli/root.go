@@ -2,7 +2,10 @@ package cli
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -20,6 +23,9 @@ var (
 	flagField    string
 	flagInsecure bool
 	flagRaw      bool
+	flagTimeout  time.Duration
+	flagRetries  int
+	flagTZ       string
 )
 
 // cliErr is a sentinel error that carries a desired process exit code.
@@ -46,6 +52,10 @@ Single static binary. Machine-readable output. Structured errors.`,
 	SilenceErrors: true,
 	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
 		output.Raw = flagRaw
+		api.Timeout, api.Retries = flagTimeout, flagRetries
+		if err := setDisplayZone(flagTZ); err != nil {
+			fmt.Fprintln(os.Stderr, "warning:", err)
+		}
 		output.Field = flagField
 		if flagYes {
 			flagApply = true // --yes is an alias for --apply
@@ -116,7 +126,7 @@ func Execute() int {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagOutput, "output", "o",
-		string(output.DefaultFormat()), "output format: json|jsonl|table")
+		string(output.DefaultFormat()), "output format: json|jsonl|table|csv")
 	rootCmd.PersistentFlags().StringVarP(&flagContext, "context", "c",
 		"", "override current context")
 	rootCmd.PersistentFlags().BoolVar(&flagApply, "apply", false,
@@ -127,6 +137,9 @@ func init() {
 		"exact-match API filter KEY=VALUE for list commands (repeatable; a repeated KEY ORs its values)")
 	rootCmd.PersistentFlags().StringVar(&flagField, "field", "",
 		"print only this field of each result, one value per line (lists print one element per line)")
+	rootCmd.PersistentFlags().DurationVar(&flagTimeout, "timeout", 180*time.Second, "timeout of each API request")
+	rootCmd.PersistentFlags().IntVar(&flagRetries, "retries", 2, "retries of read-only calls after a connection error or 502/503/504 (writes are never retried)")
+	rootCmd.PersistentFlags().StringVar(&flagTZ, "tz", os.Getenv("ZBXCTL_TZ"), "time zone for displayed times: an IANA name like America/New_York, or local (default UTC)")
 	rootCmd.PersistentFlags().BoolVar(&flagRaw, "raw", false,
 		"include raw API values (*_raw, *_unix) next to the readable ones")
 	rootCmd.PersistentFlags().BoolVar(&flagInsecure, "insecure",

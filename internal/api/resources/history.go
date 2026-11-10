@@ -31,6 +31,9 @@ type HistoryQuery struct {
 	TimeFrom  int64
 	TimeTill  int64
 	Limit     int
+	Latest    bool // with Limit: the newest rows instead of the oldest
+	All       bool // page through the whole window instead of stopping at Limit
+	MaxRows   int  // safety cap for All (default 200000)
 }
 
 // itemRef is a lightweight struct used during item resolution.
@@ -86,7 +89,13 @@ func GetHistory(c *api.Client, q HistoryQuery) ([]HistoryRecord, error) {
 		for i, r := range group {
 			ids[i] = r.ItemID
 		}
-		raw, err := fetchHistoryRaw(c, ids, vt, q.TimeFrom, q.TimeTill, q.Limit)
+		var raw []rawHistoryRecord
+		var err error
+		if q.All {
+			raw, err = fetchHistoryAll(c, ids, vt, q.TimeFrom, q.TimeTill, q.MaxRows)
+		} else {
+			raw, err = fetchHistoryRawOrder(c, ids, vt, q.TimeFrom, q.TimeTill, q.Limit, q.Latest)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -171,12 +180,20 @@ func resolveItemRefs(c *api.Client, itemIDs, hostIDs, groupIDs []string, keySear
 
 // fetchHistoryRaw calls history.get for a single value_type.
 func fetchHistoryRaw(c *api.Client, itemIDs []string, valueType int, from, till int64, limit int) ([]rawHistoryRecord, error) {
+	return fetchHistoryRawOrder(c, itemIDs, valueType, from, till, limit, false)
+}
+
+func fetchHistoryRawOrder(c *api.Client, itemIDs []string, valueType int, from, till int64, limit int, latest bool) ([]rawHistoryRecord, error) {
+	order := "ASC"
+	if latest {
+		order = "DESC"
+	}
 	params := map[string]any{
 		"output":    "extend",
 		"itemids":   itemIDs,
 		"history":   valueType,
 		"sortfield": "clock",
-		"sortorder": "ASC",
+		"sortorder": order,
 	}
 	if from > 0 {
 		params["time_from"] = from
@@ -223,4 +240,54 @@ func mergeAndSort(slices ...[]HistoryRecord) []HistoryRecord {
 		return out[i].ClockUnix < out[j].ClockUnix
 	})
 	return out
+}
+
+const historyPage = 5000
+
+// fetchHistoryAll pages through history.get. Each page starts at the clock of
+// the previous page's last row (not clock+1, which would lose rows that share
+// that second), skipping rows already seen at that boundary.
+func fetchHistoryAll(c *api.Client, itemIDs []string, valueType int, from, till int64, maxRows int) ([]rawHistoryRecord, error) {
+	if maxRows <= 0 {
+		maxRows = 200000
+	}
+	var all []rawHistoryRecord
+	seen := map[string]bool{}
+	cur := from
+	for {
+		page, err := fetchHistoryRaw(c, itemIDs, valueType, cur, till, historyPage)
+		if err != nil {
+			return nil, err
+		}
+		added := 0
+		var lastClock string
+		boundary := map[string]bool{}
+		for _, r := range page {
+			key := r.ItemID + "/" + r.Clock + "/" + r.NS + "/" + r.Value
+			lastClock = r.Clock
+			if seen[key] {
+				continue
+			}
+			all = append(all, r)
+			added++
+		}
+		if len(all) > maxRows {
+			return nil, fmt.Errorf("more than %d history rows in the window; narrow it or raise the cap", maxRows)
+		}
+		if len(page) < historyPage || added == 0 {
+			return all, nil
+		}
+		// Remember the rows at the boundary second so the next page can skip them.
+		for _, r := range page {
+			if r.Clock == lastClock {
+				boundary[r.ItemID+"/"+r.Clock+"/"+r.NS+"/"+r.Value] = true
+			}
+		}
+		seen = boundary
+		n, err := strconv.ParseInt(lastClock, 10, 64)
+		if err != nil {
+			return all, nil
+		}
+		cur = n
+	}
 }

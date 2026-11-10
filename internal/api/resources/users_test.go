@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
@@ -242,5 +244,167 @@ func TestGetTemplateFallsBackToVisibleName(t *testing.T) {
 	tpl, err := GetTemplate(c, "Visible Name")
 	if err != nil || tpl.TemplateID != "9" || n != 2 {
 		t.Fatalf("tpl=%v err=%v calls=%d", tpl, err, n)
+	}
+}
+
+func problemFixture() map[string]string {
+	return map[string]string{
+		"problem.get": `[
+			{"eventid":"4","objectid":"14","name":"d","severity":"3","clock":"4","suppressed":"1","suppression_data":[{"maintenanceid":"7","suppress_until":"0"}]},
+			{"eventid":"3","objectid":"13","name":"c","severity":"3","clock":"3","suppressed":"0"},
+			{"eventid":"2","objectid":"12","name":"b","severity":"3","clock":"2","suppressed":"0"},
+			{"eventid":"1","objectid":"11","name":"a","severity":"3","clock":"1","suppressed":"0"}]`,
+		"trigger.get": `[
+			{"triggerid":"11","status":"1","hosts":[{"host":"h1","status":"0"}],"items":[{"status":"0"}]},
+			{"triggerid":"12","status":"0","hosts":[{"host":"h2","status":"1"}],"items":[{"status":"0"}]},
+			{"triggerid":"13","status":"0","hosts":[{"host":"h3","status":"0"}],"items":[{"status":"1"},{"status":"1"}]},
+			{"triggerid":"14","status":"0","hosts":[{"host":"h4","status":"0"}],"items":[{"status":"0"}]}]`,
+	}
+}
+
+func TestProblemOrphansAndSuppression(t *testing.T) {
+	c, _ := newFake(t, problemFixture())
+	ps, err := GetProblems(c, ProblemFilter{MinSeverity: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"1": "trigger disabled", "2": "host disabled", "3": "items disabled", "4": ""}
+	for _, p := range ps {
+		if p.Orphan != want[p.EventID] {
+			t.Errorf("event %s orphan=%q want %q", p.EventID, p.Orphan, want[p.EventID])
+		}
+	}
+	if !ps[0].IsSuppressed() || !ps[0].MaintenanceSuppressed() || ps[0].Host != "h4" {
+		t.Errorf("suppression/host not filled: %+v", ps[0])
+	}
+}
+
+func TestProblemClientFiltersApplyLimitAfterFiltering(t *testing.T) {
+	c, calls := newFake(t, problemFixture())
+	ps, err := GetProblems(c, ProblemFilter{MinSeverity: -1, NoOrphans: true, Limit: 1})
+	if err != nil || len(ps) != 1 || ps[0].EventID != "4" {
+		t.Fatalf("ps=%+v err=%v", ps, err)
+	}
+	if _, sent := (*calls)[0]["params"].(map[string]any)["limit"]; sent {
+		t.Fatal("limit must not be sent to problem.get when filtering client-side")
+	}
+	ms, _ := GetProblems(c, ProblemFilter{MinSeverity: -1, Maintenance: true})
+	if len(ms) != 1 || ms[0].EventID != "4" {
+		t.Fatalf("maintenance filter: %+v", ms)
+	}
+}
+
+func TestDiagnoseTriggerReasons(t *testing.T) {
+	c, _ := newFake(t, map[string]string{
+		"trigger.get": `[{"triggerid":"5","description":"d","priority":"3","status":"1","value":"1","state":"0","manual_close":"0",
+			"hosts":[{"host":"h","status":"0","maintenance_status":"0"}],"items":[{"itemid":"1","key_":"k","status":"0","state":"1","error":"no such file"}]}]`,
+		"problem.get": `[{"eventid":"9","clock":"100","acknowledged":"0","suppressed":"1","suppression_data":[{"maintenanceid":"0","suppress_until":"200"}]}]`,
+	})
+	d, err := DiagnoseTrigger(c, "5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Recoverable {
+		t.Error("a disabled trigger can never recover")
+	}
+	joined := strings.Join(d.Reasons, " | ")
+	for _, want := range []string{"trigger is disabled", "not supported", "no such file", "event 9 is suppressed until 200", "manual close is off"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("missing %q in %s", want, joined)
+		}
+	}
+}
+
+func TestSetMaintenanceEndMovesActiveTillAndPeriodTogether(t *testing.T) {
+	c, calls := newFake(t, map[string]string{"maintenance.update": `{"maintenanceids":["3"]}`})
+	m := &Maintenance{MaintenanceID: "3", Name: "w", TimePeriods: []TimePeriod{{Type: "0", StartDate: "1000", Period: "600"}}}
+	if err := SetMaintenanceEnd(c, m, 2500); err != nil {
+		t.Fatal(err)
+	}
+	p := (*calls)[0]["params"].(map[string]any)
+	tp := p["timeperiods"].([]any)[0].(map[string]any)
+	if p["active_till"].(float64) != 2500 || tp["period"].(float64) != 1500 || tp["start_date"].(float64) != 1000 {
+		t.Fatalf("bad update: %v", p)
+	}
+	rec := &Maintenance{Name: "r", TimePeriods: []TimePeriod{{Type: "2"}}}
+	if err := SetMaintenanceEnd(c, rec, 9999); err == nil {
+		t.Fatal("recurring windows must be refused")
+	}
+	if err := SetMaintenanceEnd(c, m, 900); err == nil {
+		t.Fatal("end before start must be refused")
+	}
+}
+
+func TestFetchHistoryAllPagesWithoutLosingBoundaryRows(t *testing.T) {
+	// 7000 samples, 2 per second for the first 3000 s, so pages end mid-second.
+	var all []rawHistoryRecord
+	for i := 0; i < 7000; i++ {
+		all = append(all, rawHistoryRecord{ItemID: "1", Clock: strconv.Itoa(1000 + i/2), NS: strconv.Itoa(i % 2), Value: strconv.Itoa(i)})
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Params map[string]any `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		from := int64(0)
+		if v, ok := req.Params["time_from"].(float64); ok {
+			from = int64(v)
+		}
+		limit := int(req.Params["limit"].(float64))
+		var page []rawHistoryRecord
+		for _, rec := range all {
+			c, _ := strconv.ParseInt(rec.Clock, 10, 64)
+			if c >= from && len(page) < limit {
+				page = append(page, rec)
+			}
+		}
+		b, _ := json.Marshal(page)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + string(b) + `,"id":1}`))
+	}))
+	defer srv.Close()
+	c, _ := api.NewClient(context.Background(), &config.Context{URL: srv.URL, APIToken: "x"})
+	got, err := fetchHistoryAll(c, []string{"1"}, 3, 0, 0, 0)
+	if err != nil || len(got) != 7000 {
+		t.Fatalf("got %d rows, err=%v (want 7000: no loss, no duplicates)", len(got), err)
+	}
+	if _, err := fetchHistoryAll(c, []string{"1"}, 3, 0, 0, 100); err == nil {
+		t.Fatal("the row cap must stop runaway queries")
+	}
+}
+
+func TestGetTrendsOnlyNumericItems(t *testing.T) {
+	c, calls := newFake(t, map[string]string{
+		"item.get":  `[{"itemid":"1","hostid":"9","key_":"cpu","value_type":"0","hosts":[{"host":"h"}]},{"itemid":"2","hostid":"9","key_":"msg","value_type":"4","hosts":[{"host":"h"}]}]`,
+		"trend.get": `[{"itemid":"1","clock":"7200","num":"60","value_min":"1","value_avg":"2","value_max":"3"},{"itemid":"1","clock":"3600","num":"60","value_min":"0","value_avg":"1","value_max":"2"}]`,
+	})
+	rs, err := GetTrends(c, TrendQuery{HostIDs: []string{"9"}, KeySearch: "c"})
+	if err != nil || len(rs) != 2 || rs[0].ClockUnix != 3600 || rs[0].Host != "h" {
+		t.Fatalf("rs=%+v err=%v", rs, err)
+	}
+	ids := (*calls)[1]["params"].(map[string]any)["itemids"].([]any)
+	if len(ids) != 1 || ids[0] != "1" {
+		t.Fatalf("text item must not be queried for trends: %v", ids)
+	}
+}
+
+func TestGetLostAndRuleCounts(t *testing.T) {
+	c, _ := newFake(t, map[string]string{
+		"item.get":             `[{"itemid":"100","name":"a","key_":"k1","hostid":"10","hosts":[{"hostid":"10","host":"h"}],"itemDiscovery":{"status":"1","lastcheck":"1","ts_delete":"9","parent_itemid":"900"}},{"itemid":"101","name":"b","key_":"k2","hostid":"10","hosts":[{"hostid":"10","host":"h"}],"itemDiscovery":{"status":"0","parent_itemid":"900"}}]`,
+		"itemprototype.get":    `[{"itemid":"900","discoveryRule":{"itemid":"50"}}]`,
+		"trigger.get":          `[]`,
+		"triggerprototype.get": `[]`,
+		"discoveryrule.get":    `[{"itemid":"50","hostid":"10","name":"FS","key_":"vfs.fs.discovery","status":"0","state":"0","error":"","delay":"1h","items":"2","triggers":"1","hosts":[{"host":"h"}]}]`,
+	})
+	rules, err := GetDiscoveryRules(c, nil)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("rules=%+v err=%v", rules, err)
+	}
+	r := rules[0]
+	if r.LostItems != 1 || r.ItemPrototypes != 2 || r.TriggerPrototypes != 1 || !r.Enabled {
+		t.Fatalf("bad rule: %+v", r)
+	}
+	lost, _ := GetLost(c, "item", nil, nil)
+	if len(lost) != 1 || lost[0].ID != "100" || lost[0].RuleID != "50" || lost[0].DeletesAt != "9" {
+		t.Fatalf("lost: %+v", lost)
 	}
 }
