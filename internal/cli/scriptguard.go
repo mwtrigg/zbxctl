@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/mwtrigg/zbxctl/internal/api/resources"
 	"github.com/mwtrigg/zbxctl/internal/output"
 	"io"
 	"os"
@@ -11,18 +12,21 @@ import (
 )
 
 // scriptPin is the allowlist entry for a script: its name (or ID) and a hash of
-// the command it runs. The command is part of the entry because a script's name
-// says nothing about what it does: anyone who can edit scripts in Zabbix could
-// otherwise swap the command of an allowlisted script after it was reviewed.
-func scriptPin(nameOrID, command string) string {
-	sum := sha256.Sum256([]byte(command))
+// its whole definition, canonical JSON of the name, type, scope, where it executes,
+// the command and its parameters, the user, the authentication type and the port.
+// A script's name says nothing about what it does: anyone who can edit scripts in
+// Zabbix could otherwise swap the command of an allowlisted script after it was
+// reviewed, or move it from the agent to the Zabbix server.
+func scriptPin(nameOrID string, s resources.Script) string {
+	sum := sha256.Sum256(s.Definition())
 	return nameOrID + "@sha256:" + hex.EncodeToString(sum[:])
 }
 
 // scriptAllowed reports whether the allowlist permits running this script, and
 // when it does not, says why and which entry would allow it.
-func scriptAllowed(entries []string, name, id, command string) (bool, string) {
-	pinName, pinID := scriptPin(name, command), scriptPin(id, command)
+func scriptAllowed(entries []string, s resources.Script) (bool, string) {
+	name, id := s.Name, s.ScriptID
+	pinName, pinID := scriptPin(name, s), scriptPin(id, s)
 	sameScript := false
 	for _, e := range entries {
 		e = strings.TrimSpace(e)
@@ -38,7 +42,7 @@ func scriptAllowed(entries []string, name, id, command string) (bool, string) {
 		}
 	}
 	if sameScript {
-		return false, fmt.Sprintf("the command of script %q is not the one that was allowed (it changed, or was never reviewed); if you have reviewed it, the entry is %q", name, pinName)
+		return false, fmt.Sprintf("the definition of script %q (command, where it runs, parameters, user) is not the one that was allowed: it changed, or was never reviewed; if you have reviewed it, the entry is %q", name, pinName)
 	}
 	return false, fmt.Sprintf("script %q is not in allowed_scripts for this context; to allow it as it is now, add %q", name, pinName)
 }

@@ -535,10 +535,17 @@ var runScriptCmd = &cobra.Command{
 SECURITY: This command executes code on a monitored host. It requires:
   - the operator or write permission tier
   - allowed_scripts in the active context config, each entry pinned to the script's
-    command as name@sha256:<hash>; a script whose command changed is refused, and the
-    refusal prints the entry to add once you have reviewed the new command
-  - a person at a terminal: the confirmation token is read from /dev/tty, so it cannot
-    be piped in, and --yes has no effect on this command
+    whole definition (command, where it runs, parameters, user) as name@sha256:<hash>;
+    a script that changed is refused, and the refusal prints the entry to add once you
+    have reviewed the new one. Scripts whose command uses user macros ({$...}) are refused
+  - a confirmation token typed at a terminal; --yes has no effect on this command
+
+What this protects, and what it does not: the allowlist stops a script from running
+that nobody reviewed, and the token stops an accidental or casual automated run. It is
+NOT a barrier against a program running as your user: such a program can allocate a
+terminal, read the token and type it back. So do not set allowed_scripts on a context
+that an agent's OS user can use. Over MCP, run script does not exist (the server does not
+offer it and the child process refuses it).
 
 Recommended: use a read-only API token for agent contexts. Enable run script
 only for pre-reviewed diagnostic scripts (ping, traceroute, read-only checks).`,
@@ -599,7 +606,12 @@ func runRunScript(_ *cobra.Command, args []string) error {
 
 	// Check against allowed_scripts: the script's name or ID AND a hash of its
 	// command must match an entry, so a script edited after review is refused.
-	if ok, why := scriptAllowed(ctx.AllowedScripts, script.Name, script.ScriptID, script.Command); !ok {
+	if strings.Contains(script.Command, "{$") {
+		// Zabbix expands user macros in a script before running it, and anyone who can set
+		// a macro can change what they expand to: the reviewed text is not what would run.
+		return cliPrintErr(outFmt, fmt.Sprintf("script %q uses user macros ({$...}) in its command; their values can be changed by anyone who can set macros, so it cannot be pinned. Put the values in the script", script.Name), output.ExitPermission)
+	}
+	if ok, why := scriptAllowed(ctx.AllowedScripts, *script); !ok {
 		return cliPrintErr(outFmt, why, output.ExitPermission)
 	}
 	tty, err := openConfirmationInput()

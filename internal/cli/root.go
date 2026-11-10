@@ -92,6 +92,9 @@ func enforceMCPPolicy(cmd *cobra.Command, args []string) error {
 	if len(bad) > 0 {
 		return &usageError{msg: "not allowed over MCP: " + strings.Join(bad, ", ")}
 	}
+	if mcpCommandDenied(cmd.CommandPath()) {
+		return &usageError{msg: "not allowed over MCP: " + cmd.CommandPath()}
+	}
 	if cmd.CommandPath() == "zbxctl state show" {
 		for _, a := range args {
 			if strings.ContainsAny(a, `/\`) {

@@ -15,6 +15,34 @@ type Script struct {
 	ExecuteOn   string `json:"execute_on"` // see executeOnLabel; only meaningful for type=script
 	Description string `json:"description"`
 	Command     string `json:"command"`
+
+	// What decides where and how the command runs. They are part of the definition
+	// that an allowlist pin covers: changing a script from the agent to the server
+	// keeps its name and command but changes who runs it.
+	Scope      string          `json:"scope"`
+	Port       string          `json:"port"`
+	AuthType   string          `json:"authtype"`
+	Username   string          `json:"username"`
+	Timeout    string          `json:"timeout"`
+	Parameters json.RawMessage `json:"parameters"`
+}
+
+// Definition is the canonical JSON of everything about a script that decides what
+// runs where: the allowlist pin hashes exactly this.
+func (s Script) Definition() []byte {
+	b, _ := json.Marshal(struct {
+		Name       string          `json:"name"`
+		Type       string          `json:"type"`
+		Scope      string          `json:"scope"`
+		ExecuteOn  string          `json:"execute_on"`
+		Command    string          `json:"command"`
+		Parameters json.RawMessage `json:"parameters"`
+		Username   string          `json:"username"`
+		AuthType   string          `json:"authtype"`
+		Port       string          `json:"port"`
+		Timeout    string          `json:"timeout"`
+	}{s.Name, s.Type, s.Scope, s.ExecuteOn, s.Command, s.Parameters, s.Username, s.AuthType, s.Port, s.Timeout})
+	return b
 }
 
 // ScriptFilter controls which scripts are returned.
@@ -55,9 +83,7 @@ func GetScripts(c *api.Client, f ScriptFilter) ([]Script, error) {
 // GetScriptByNameOrID returns a single script by numeric ID or exact name.
 // If hostID is non-empty, the search is scoped to scripts applicable to that host.
 func GetScriptByNameOrID(c *api.Client, nameOrID string, hostID string) (*Script, error) {
-	params := map[string]any{
-		"output": []string{"scriptid", "name", "type", "execute_on", "description", "command"},
-	}
+	params := map[string]any{"output": "extend"}
 	if isNumeric(nameOrID) {
 		params["scriptids"] = []string{nameOrID}
 	} else {
@@ -77,6 +103,11 @@ func GetScriptByNameOrID(c *api.Client, nameOrID string, hostID string) (*Script
 	}
 	if len(scripts) == 0 {
 		return nil, &NotFoundError{Resource: "script", Query: nameOrID}
+	}
+	if len(scripts) > 1 {
+		// Several scripts with this name: taking the first would run whichever Zabbix
+		// happens to list first, which is not what anyone reviewed.
+		return nil, fmt.Errorf("%d scripts are named %q: use the script ID", len(scripts), nameOrID)
 	}
 	return &scripts[0], nil
 }

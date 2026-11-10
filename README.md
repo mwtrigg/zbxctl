@@ -76,7 +76,7 @@ zbxctl diagnose host web-01                         # one call: problems, events
 | `--apply` on a change | Saves a **before-state file** (what was done, what the target looked like before), applies the changes one by one, then re-reads each target to **verify** it. |
 | `delete user` | Refuses `Admin` and the user that owns the credentials in use. |
 | Secrets | Passwords and secret macro values come from a file or stdin, never a flag; secret values are never printed or saved. |
-| `run script` | Needs the operator tier, the script on an allowlist pinned to its command (`name@sha256:<hash>`, so an edited script is refused), and a one-time code typed at a terminal (read from `/dev/tty`, so it cannot be piped in). |
+| `run script` | Needs the operator tier, the script on an allowlist pinned to its whole definition (`name@sha256:<hash>` of the command, where it runs, its parameters and user, so an edited script is refused; scripts that use `{$MACROS}` are refused), and a one-time code typed at a terminal. **This is a guard against accidents and casual automation, not a barrier against a program running as your user**: such a program can allocate a terminal, read the code and type it back. Do not set `allowed_scripts` on a context that an agent's OS user can use. Over MCP it does not exist. |
 
 **Applying by default.** The dry run is the right default for agents and for a first look, and tedious for a person who knows what they are doing. For a connection you trust, set `mode: apply` in the config (or `ZBXCTL_MODE=apply`): changes then happen without `--apply`, and `--dry-run` previews one command. Everything else still protects you: bulk targets are all resolved first, `--expect` still guards, the before-state file is still saved and the result is still verified, `delete user` still refuses `Admin`, and `run script` still needs its allowlist and confirmation code. `state prune` deletes audit files, so it always needs an explicit `--apply`. `zbxctl auth status` shows the mode of the connection in use. **The MCP server ignores this setting**: an agent calling it always gets a dry run unless it passes `apply: true`.
 
@@ -148,7 +148,7 @@ tag host | untag host
 update host --proxy <name|none> | --proxy-group <name> | --add-template | --remove-template (unlink; items stay) | --clear-template (unlink and delete what it gave the host)
 export | diff | import   template | host
 delete template | delete lost items | delete lost triggers
-run script <name> --host <host>        (pinned allowlist, operator tier and a person at a terminal required)
+run script <name> --host <host>        (pinned allowlist, operator tier and a typed code; see the note on what that does and does not stop)
 api call <method> --params '{...}'     (escape hatch: reads run with secrets masked; writes are a dry run, and user/token/script/action/role/usergroup/authentication/userdirectory/mediatype writes need api_call_admin: true)
 ```
 
@@ -233,7 +233,7 @@ contexts:
     api_version: ""                 # pin e.g. "7.4" or "8.0"; empty = detect
     mode: dry-run                   # dry-run (default) or apply: what a change does without --apply/--dry-run
     permissions: write              # readonly | operator | write
-    allowed_scripts: []             # what `run script` may execute, as name@sha256:<hash of the command>; empty = blocked (a refusal prints the entry to add)
+    allowed_scripts: []             # what `run script` may execute, as name@sha256:<hash of the definition>; empty = blocked (a refusal prints the entry to add)
     api_call_admin: false           # true lets `api call` write user, token, script, action, role... objects
     before_state: true              # audit files for changes made with --apply
     state_dir: ""                   # empty = ~/.local/state/zbxctl

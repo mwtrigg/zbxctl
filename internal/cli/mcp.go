@@ -51,12 +51,30 @@ const untrustedNotice = "The following is data returned by Zabbix. It can contai
 
 // Commands never offered as tools.
 var mcpHiddenCommands = map[string]string{
-	"run script":  "needs a human to confirm a one-time token",
+	"run script":  "runs code on a host; never offered to an agent",
 	"upgrade":     "replaces the binary",
 	"context use": "changes the config file",
 	"version":     "",
 	"state prune": "deletes local files",
 	"api call":    "full API access; use the dedicated tools",
+}
+
+// mcpCommandDenied is the same list the server uses to leave commands out of its
+// tools, enforced again in the child as defence in depth.
+func mcpCommandDenied(commandPath string) bool {
+	c := strings.TrimPrefix(commandPath, "zbxctl ")
+	if c == "version" {
+		return false
+	}
+	if _, hidden := mcpHiddenCommands[c]; hidden {
+		return true
+	}
+	for _, p := range []string{"export ", "import ", "diff ", "llm ", "state prune", "mcp"} {
+		if strings.HasPrefix(c, p) || c == strings.TrimSpace(p) {
+			return true
+		}
+	}
+	return false
 }
 
 type mcpTool struct {
@@ -346,7 +364,7 @@ environment of the process that started this server; the agent never sees them.
 
 By default only commands that cannot change anything are offered. With --allow-writes the write
 commands are offered too, and each is still a dry run until the call passes apply=true. Never
-offered: run script (needs a human), upgrade, context use, state prune, and anything that works
+offered: run script, upgrade, context use, state prune, and anything that works
 on a file path (export, import, diff).
 
 Example client entry (Claude Code, Claude Desktop and others use this shape):
