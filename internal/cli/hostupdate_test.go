@@ -18,7 +18,19 @@ func hostWithTemplates(call rpcCall) fakeReply {
 	if call.Method == "host.update" {
 		return fakeReply{Result: `{"hostids":["10"]}`}
 	}
-	return fakeReply{}
+	return templateByID(call)
+}
+
+// templateByID answers template.get for an ID lookup and finds nothing by name.
+func templateByID(call rpcCall) fakeReply {
+	if call.Method != "template.get" {
+		return fakeReply{}
+	}
+	if ids, ok := call.Params["templateids"].([]any); ok && len(ids) == 1 {
+		id := ids[0].(string)
+		return fakeReply{Result: `[{"templateid":"` + id + `","host":"T` + id + `","name":"T` + id + `"}]`}
+	}
+	return fakeReply{Result: "[]"}
 }
 
 func templateIDs(t *testing.T, call rpcCall, key string) []string {
@@ -133,7 +145,7 @@ func TestUpdateHostVerifiesTheResult(t *testing.T) {
 			}
 			return fakeReply{Result: `[{"hostid":"10","host":"web1","name":"Web 1","status":"0","hostgroups":[{"groupid":"1","name":"G"}],"parentTemplates":[` + strings.Join(refs, ",") + `],"interfaces":[],"tags":[],"macros":[]}]`}
 		}
-		return fakeReply{}
+		return templateByID(call)
 	}
 	out, err := runFake(t, f, "update", "host", "web1", "--remove-template", "20", "--apply")
 	if err != nil || !strings.Contains(out, `"verified": true`) {

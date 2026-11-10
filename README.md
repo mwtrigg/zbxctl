@@ -247,6 +247,8 @@ Never put a token in a command line or commit one. A token flag does not exist o
 
 JSON is the default; `-o jsonl` gives one object per line, `-o csv` a header plus rows, `-o table` is for humans. Times are RFC3339 with an explicit offset (UTC unless you set `--tz`); `--raw` adds the raw API values.
 
+Lists stop at a limit (`default_limit`, 100 unless you set it, or `--limit N`). When a list has that many rows the JSON `meta` says `"limit_reached": true` (table and CSV print a note on stderr), because there may be more: raise `--limit`, or use `--limit -1` for everything. A host or template whose name is all digits (a store or asset number) is looked up by ID and by name; if they are two different objects the command stops and asks you to write `id:1001` or `name:1001`.
+
 | Code | Kind | Meaning |
 |---|---|---|
 | 0 | | success (a dry run also exits 0) |

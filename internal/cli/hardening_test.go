@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -196,5 +198,102 @@ func TestUpgradeAsksForYesWhenThereIsNoTerminal(t *testing.T) {
 	var ce *cliErr
 	if !errors.As(err, &ce) || ce.code != 5 {
 		t.Fatalf("with no terminal and no --yes, upgrade must ask for --yes (exit 5), got %v", err)
+	}
+}
+
+func hostsReply(n int) fakeReply {
+	var hs []string
+	for i := 0; i < n; i++ {
+		hs = append(hs, fmt.Sprintf(`{"hostid":"%d","host":"h%d","name":"H%d","status":"0","interfaces":[]}`, 100+i, i, i))
+	}
+	return fakeReply{Result: "[" + strings.Join(hs, ",") + "]"}
+}
+
+func TestListsSayWhenTheyReachTheLimit(t *testing.T) {
+	type meta struct {
+		Meta map[string]any `json:"meta"`
+	}
+	run := func(n int, args ...string) (meta, []rpcCall) {
+		f := &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+			if c.Method == "host.get" {
+				return hostsReply(n)
+			}
+			return fakeReply{}
+		}}
+		out, err := runFake(t, f, append([]string{"get", "hosts"}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m meta
+		if err := json.Unmarshal([]byte(out), &m); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		return m, f.called("host.get")
+	}
+	if m, _ := run(2, "--limit", "2"); m.Meta["limit_reached"] != true || m.Meta["limit"] != float64(2) {
+		t.Fatalf("a full page must say the limit was reached: %v", m.Meta)
+	}
+	if m, _ := run(1, "--limit", "2"); m.Meta["limit_reached"] != false {
+		t.Fatalf("a short page is complete: %v", m.Meta)
+	}
+	m, calls := run(3, "--limit", "-1")
+	if _, has := m.Meta["limit"]; has {
+		t.Fatalf("--limit -1 means no limit: %v", m.Meta)
+	}
+	if _, sent := calls[0].Params["limit"]; sent {
+		t.Fatalf("--limit -1 must not send a limit to Zabbix: %v", calls[0].Params)
+	}
+}
+
+// A host named like an ID (a store or asset number) must not silently turn into
+// the host that has that ID.
+func TestNumericNamesAreNotAlwaysIDs(t *testing.T) {
+	host := func(id, name string) string {
+		return `{"hostid":"` + id + `","host":"` + name + `","name":"` + name + `","status":"0","hostgroups":[],"parentTemplates":[],"interfaces":[],"tags":[],"macros":[]}`
+	}
+	handler := func(withID, withName bool) func(rpcCall) fakeReply {
+		return func(c rpcCall) fakeReply {
+			if c.Method != "host.get" {
+				return fakeReply{}
+			}
+			if ids, ok := c.Params["hostids"].([]any); ok && len(ids) == 1 {
+				if withID {
+					return fakeReply{Result: "[" + host("1001", "alpha") + "]"}
+				}
+				return fakeReply{Result: "[]"}
+			}
+			if withName {
+				return fakeReply{Result: "[" + host("55", "1001") + "]"}
+			}
+			return fakeReply{Result: "[]"}
+		}
+	}
+	get := func(h func(rpcCall) fakeReply, arg string) (string, error) {
+		return runFake(t, &fakeZabbix{Handler: h}, "get", "host", arg)
+	}
+	out, err := get(handler(true, true), "1001")
+	var ce *cliErr
+	if !errors.As(err, &ce) || ce.code != 5 {
+		t.Fatalf("both an ID and a name match: that must be refused as a usage error (exit 5), got err=%v\n%s", err, out)
+	}
+	if out, err := get(handler(true, true), "id:1001"); err != nil || !strings.Contains(out, "alpha") {
+		t.Fatalf("id: picks the ID: %v\n%s", err, out)
+	}
+	if out, err := get(handler(true, true), "name:1001"); err != nil || !strings.Contains(out, `"host": "1001"`) {
+		t.Fatalf("name: picks the name: %v\n%s", err, out)
+	}
+	if out, err := get(handler(false, true), "1001"); err != nil || !strings.Contains(out, `"hostid": "55"`) {
+		t.Fatalf("a numeric name with no host of that ID resolves by name: %v\n%s", err, out)
+	}
+	if out, err := get(handler(true, false), "1001"); err != nil || !strings.Contains(out, "alpha") {
+		t.Fatalf("an ID with no host of that name resolves by ID: %v\n%s", err, out)
+	}
+	// full-width digits are a name, never an ID
+	f := &fakeZabbix{Handler: handler(false, false)}
+	_, _ = runFake(t, f, "get", "host", "１００１")
+	for _, c := range f.called("host.get") {
+		if _, byID := c.Params["hostids"]; byID {
+			t.Fatalf("non-ASCII digits must not be looked up as an ID: %v", c.Params)
+		}
 	}
 }

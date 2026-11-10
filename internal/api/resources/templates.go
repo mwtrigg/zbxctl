@@ -60,15 +60,42 @@ func GetTemplates(c *api.Client, f TemplateFilter) ([]Template, error) {
 // GetTemplate returns a single template by numeric ID, technical name, or
 // visible name (looked up in that order, like GetHost).
 func GetTemplate(c *api.Client, idOrName string) (*Template, error) {
-	if isNumeric(idOrName) {
-		return templateGetOne(c, map[string]any{"templateids": []string{idOrName}}, idOrName)
+	byID := func(id string) (*Template, error) {
+		return templateGetOne(c, map[string]any{"templateids": []string{id}}, id)
 	}
-	t, err := templateGetOne(c, map[string]any{"filter": map[string]any{"host": []string{idOrName}}}, idOrName)
-	var nfe *NotFoundError
-	if err != nil && errors.As(err, &nfe) {
-		return templateGetOne(c, map[string]any{"filter": map[string]any{"name": []string{idOrName}}}, idOrName)
+	byName := func(name string) (*Template, error) {
+		t, err := templateGetOne(c, map[string]any{"filter": map[string]any{"host": []string{name}}}, name)
+		var nfe *NotFoundError
+		if err != nil && errors.As(err, &nfe) {
+			return templateGetOne(c, map[string]any{"filter": map[string]any{"name": []string{name}}}, name)
+		}
+		return t, err
 	}
-	return t, err
+	mode, v := splitQualifier(idOrName)
+	switch {
+	case mode == "id":
+		return byID(v)
+	case mode == "name" || !isNumeric(v):
+		return byName(v)
+	}
+	// All digits: an ID, or a template named like one. See GetHost.
+	tid, ierr := byID(v)
+	tname, nerr := byName(v)
+	for _, err := range []error{ierr, nerr} {
+		var nfe *NotFoundError
+		if err != nil && !errors.As(err, &nfe) {
+			return nil, err
+		}
+	}
+	switch {
+	case ierr == nil && nerr == nil && tid.TemplateID != tname.TemplateID:
+		return nil, &AmbiguousError{Resource: "template", Query: v, ByID: fmt.Sprintf("template %q", tid.Host), ByName: fmt.Sprintf("template %q (ID %s)", tname.Host, tname.TemplateID)}
+	case ierr == nil:
+		return tid, nil
+	case nerr == nil:
+		return tname, nil
+	}
+	return nil, &NotFoundError{Resource: "template", Query: v}
 }
 
 func templateGetOne(c *api.Client, extra map[string]any, query string) (*Template, error) {

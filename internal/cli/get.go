@@ -53,12 +53,20 @@ func newClient() (*api.Client, output.Format, *config.Context, error) {
 	return c, outFmt, ctx, nil
 }
 
-// effectiveLimit returns the user-supplied limit or the context default.
+// effectiveLimit returns the user-supplied limit or the context default. A negative
+// limit means no limit. The limit in force is recorded so the output can say when
+// a list reached it: a list that stops at the limit looks complete otherwise.
 func effectiveLimit(flagLimit int, ctx *config.Context) int {
-	if flagLimit > 0 {
-		return flagLimit
+	n := ctx.DefaultLimit
+	if flagLimit != 0 {
+		n = flagLimit
 	}
-	return ctx.DefaultLimit
+	if n < 0 {
+		output.Limit = 0
+		return 0
+	}
+	output.Limit = n
+	return n
 }
 
 // parseTimestamp parses a Unix timestamp (integer string) or an RFC3339 /

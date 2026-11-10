@@ -34,6 +34,12 @@ var Field string
 // Command is the command path reported in the JSON envelope's meta.
 var Command string
 
+// Limit is the result limit in force for a list command (0 = none). When a list
+// has that many rows the output says so, since there may be more.
+var Limit int
+
+func limitReached(rows []map[string]any) bool { return Limit > 0 && len(rows) >= Limit }
+
 // KindFor maps an exit code to a stable machine-readable error kind.
 func KindFor(code int) string {
 	switch code {
@@ -96,6 +102,9 @@ func Print(format Format, columns []Column, rows []map[string]any) error {
 	}
 	rows = stripRaw(rows)
 	columns = visibleColumns(columns)
+	if format != FormatJSON && limitReached(rows) {
+		fmt.Fprintf(os.Stderr, "note: showing %d rows, the limit; there may be more (raise --limit, or --limit -1 for all)\n", Limit)
+	}
 	switch format {
 	case FormatJSON:
 		return printJSON(columns, rows)
@@ -155,13 +164,15 @@ func printTable(columns []Column, rows []map[string]any) error {
 }
 
 func printJSON(_ []Column, rows []map[string]any) error {
-	envelope := map[string]any{
-		"data": rows,
-		"meta": map[string]any{
-			"count":   len(rows),
-			"command": Command,
-		},
+	meta := map[string]any{
+		"count":   len(rows),
+		"command": Command,
 	}
+	if Limit > 0 {
+		meta["limit"] = Limit
+		meta["limit_reached"] = limitReached(rows) // true: there may be more rows; raise --limit (-1 for all)
+	}
+	envelope := map[string]any{"data": rows, "meta": meta}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")

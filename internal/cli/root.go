@@ -58,6 +58,7 @@ Single static binary. Machine-readable output. Structured errors.`,
 			return err
 		}
 		output.Raw = flagRaw
+		output.Limit = 0
 		api.Timeout, api.Retries = flagTimeout, flagRetries
 		if err := setDisplayZone(flagTZ); err != nil {
 			fmt.Fprintln(os.Stderr, "warning:", err)
@@ -109,6 +110,7 @@ func classify(err error) int {
 	var fe *output.FieldError
 	var uv *api.UnsupportedVersionError
 	var uo *outcomeUnknownError
+	var amb *resources.AmbiguousError
 	switch {
 	case errors.As(err, &uo):
 		return output.ExitUnknown
@@ -119,6 +121,8 @@ func classify(err error) int {
 	case isCobraUsage(err):
 		return output.ExitUsage
 	case errors.As(err, &ue):
+		return output.ExitUsage
+	case errors.As(err, &amb):
 		return output.ExitUsage
 	case errors.As(err, &nfe):
 		return output.ExitNotFound

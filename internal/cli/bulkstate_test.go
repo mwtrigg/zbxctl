@@ -127,30 +127,25 @@ func TestAnUnclearFailureThatVerifiesIsReportedAsApplied(t *testing.T) {
 }
 
 func TestTheStateFileRecordsWhatHappenedToEachTarget(t *testing.T) {
+	calls := 0
 	f := &fakeZabbix{}
 	f.Handler = func(call rpcCall) fakeReply {
-		if call.Method == "host.get" {
-			return fakeReply{Result: `[{"hostid":"10","host":"web1","name":"Web 1","status":"0","hostgroups":[],"parentTemplates":[],"interfaces":[],"tags":[],"macros":[]}]`}
-		}
-		return fakeReply{}
-	}
-	calls := 0
-	inner := f.Handler
-	f.Handler = func(call rpcCall) fakeReply {
-		if call.Method == "host.update" {
+		switch call.Method {
+		case "host.get":
+			// a lookup by ID finds that host; a lookup by name finds nothing
+			if ids, ok := call.Params["hostids"].([]any); ok && len(ids) == 1 {
+				id := ids[0].(string)
+				return fakeReply{Result: `[{"hostid":"` + id + `","host":"web` + id + `","name":"Web ` + id + `","status":"0","hostgroups":[],"parentTemplates":[],"interfaces":[],"tags":[],"macros":[]}]`}
+			}
+			return fakeReply{Result: "[]"}
+		case "host.update":
 			calls++
 			if calls == 2 {
 				return fakeReply{RPCError: "denied"}
 			}
 			return fakeReply{Result: `{"hostids":["10"]}`}
 		}
-		if call.Method == "host.get" {
-			// distinct ids per requested host so the two targets do not dedupe
-			if ids, ok := call.Params["hostids"].([]any); ok && len(ids) == 1 && ids[0] == "11" {
-				return fakeReply{Result: `[{"hostid":"11","host":"web2","name":"Web 2","status":"0","hostgroups":[],"parentTemplates":[],"interfaces":[],"tags":[],"macros":[]}]`}
-			}
-		}
-		return inner(call)
+		return fakeReply{}
 	}
 	_, err := runFake(t, f, "disable", "host", "10", "11", "--apply", "--no-verify")
 	if err == nil {

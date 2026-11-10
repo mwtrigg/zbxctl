@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"unicode"
+	"strings"
 
 	"github.com/mwtrigg/zbxctl/internal/api"
 )
@@ -156,28 +156,57 @@ func GetHosts(c *api.Client, f HostFilter) ([]Host, error) {
 func GetHost(c *api.Client, idOrName string) (*Host, error) {
 	outputFields := []string{"hostid", "host", "name", "status", "description", "monitored_by", "proxyid", "proxy_groupid"}
 
-	if isNumeric(idOrName) {
-		return hostGetOne(c, outputFields, map[string]any{
-			"hostids": []string{idOrName},
-		}, idOrName)
+	byID := func(id string) (*Host, error) {
+		return hostGetOne(c, outputFields, map[string]any{"hostids": []string{id}}, id)
 	}
+	byName := func(name string) (*Host, error) {
+		h, err := hostGetOne(c, outputFields, map[string]any{"filter": map[string]any{"host": []string{name}}}, "")
+		if err == nil {
+			return h, nil
+		}
+		var nfe *NotFoundError
+		if !errors.As(err, &nfe) {
+			return nil, err
+		}
+		return hostGetOne(c, outputFields, map[string]any{"filter": map[string]any{"name": []string{name}}}, name)
+	}
+	mode, v := splitQualifier(idOrName)
+	switch {
+	case mode == "id":
+		return byID(v)
+	case mode == "name" || !isNumeric(v):
+		return byName(v)
+	}
+	// All digits: an ID, or a host named like one (store and asset numbers are).
+	// Look for both; if they are different hosts the caller has to say which.
+	hid, ierr := byID(v)
+	hname, nerr := byName(v)
+	for _, err := range []error{ierr, nerr} {
+		var nfe *NotFoundError
+		if err != nil && !errors.As(err, &nfe) {
+			return nil, err
+		}
+	}
+	switch {
+	case ierr == nil && nerr == nil && hid.HostID != hname.HostID:
+		return nil, &AmbiguousError{Resource: "host", Query: v, ByID: fmt.Sprintf("host %q", hid.Host), ByName: fmt.Sprintf("host %q (ID %s)", hname.Host, hname.HostID)}
+	case ierr == nil:
+		return hid, nil
+	case nerr == nil:
+		return hname, nil
+	}
+	return nil, &NotFoundError{Resource: "host", Query: v}
+}
 
-	// Try technical name.
-	h, err := hostGetOne(c, outputFields, map[string]any{
-		"filter": map[string]any{"host": []string{idOrName}},
-	}, "")
-	if err == nil {
-		return h, nil
+// splitQualifier splits "id:123" and "name:123", which say how to read a value
+// that could be either. Without a qualifier the mode is empty.
+func splitQualifier(s string) (mode, value string) {
+	for _, q := range []string{"id", "name"} {
+		if strings.HasPrefix(s, q+":") {
+			return q, strings.TrimPrefix(s, q+":")
+		}
 	}
-	var nfe *NotFoundError
-	if !errors.As(err, &nfe) {
-		return nil, err
-	}
-
-	// Fall back to visible name.
-	return hostGetOne(c, outputFields, map[string]any{
-		"filter": map[string]any{"name": []string{idOrName}},
-	}, idOrName)
+	return "", s
 }
 
 func hostGetOne(c *api.Client, outputFields []string, extraParams map[string]any, query string) (*Host, error) {
@@ -205,9 +234,6 @@ func hostGetOne(c *api.Client, outputFields []string, extraParams map[string]any
 
 // ResolveHostID returns the hostid for a given numeric ID or technical name.
 func ResolveHostID(c *api.Client, idOrName string) (string, error) {
-	if isNumeric(idOrName) {
-		return idOrName, nil
-	}
 	h, err := GetHost(c, idOrName)
 	if err != nil {
 		return "", err
@@ -215,13 +241,14 @@ func ResolveHostID(c *api.Client, idOrName string) (string, error) {
 	return h.HostID, nil
 }
 
-// isNumeric returns true if s consists entirely of decimal digits.
+// isNumeric returns true if s consists entirely of ASCII digits (other scripts'
+// digits, like Arabic-Indic or full-width ones, are names, not IDs).
 func isNumeric(s string) bool {
 	if s == "" {
 		return false
 	}
 	for _, r := range s {
-		if !unicode.IsDigit(r) {
+		if r < '0' || r > '9' {
 			return false
 		}
 	}
@@ -242,27 +269,11 @@ func ResolveGroupID(c *api.Client, nameOrID string) (string, error) {
 
 // ResolveTemplateID returns the templateid for a given name or numeric ID.
 func ResolveTemplateID(c *api.Client, nameOrID string) (string, error) {
-	if isNumeric(nameOrID) {
-		return nameOrID, nil
-	}
-	params := map[string]any{
-		"output": []string{"templateid", "host"},
-		"filter": map[string]any{"host": []string{nameOrID}},
-	}
-	raw, err := c.Call("template.get", params)
+	t, err := GetTemplate(c, nameOrID)
 	if err != nil {
-		return "", fmt.Errorf("template.get: %w", err)
+		return "", err
 	}
-	var templates []struct {
-		TemplateID string `json:"templateid"`
-	}
-	if err := json.Unmarshal(raw, &templates); err != nil {
-		return "", fmt.Errorf("parsing template: %w", err)
-	}
-	if len(templates) == 0 {
-		return "", &NotFoundError{Resource: "template", Query: nameOrID}
-	}
-	return templates[0].TemplateID, nil
+	return t.TemplateID, nil
 }
 
 // ResolveHostNames returns a map of hostid → hostname for the given IDs.
