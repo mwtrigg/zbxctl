@@ -9,6 +9,8 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-10
+
 ### Changed
 - `zbxctl upgrade` removes the previous binary once the new one has started and answered (it used to leave `zbxctl.old`
   behind); if the new binary does not run, the old one is put back. `--keep-old` keeps the old one.
