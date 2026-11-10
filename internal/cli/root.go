@@ -12,6 +12,7 @@ import (
 
 	"github.com/mwtrigg/zbxctl/internal/api"
 	"github.com/mwtrigg/zbxctl/internal/api/resources"
+	"github.com/mwtrigg/zbxctl/internal/config"
 	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
@@ -111,9 +112,14 @@ func classify(err error) int {
 	var uv *api.UnsupportedVersionError
 	var uo *outcomeUnknownError
 	var amb *resources.AmbiguousError
+	var pe *config.PermissionError
 	switch {
 	case errors.As(err, &uo):
 		return output.ExitUnknown
+	case errors.As(err, &pe):
+		return output.ExitPermission
+	case errors.Is(err, config.ErrNotConfigured):
+		return output.ExitUsage
 	case errors.As(err, &uv):
 		return output.ExitVersion
 	case errors.As(err, &fe):

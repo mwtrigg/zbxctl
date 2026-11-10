@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -44,6 +45,10 @@ type Context struct {
 
 // SaveBeforeState reports whether before-state files should be written.
 func (c *Context) SaveBeforeState() bool { return c.BeforeState == nil || *c.BeforeState }
+
+// ErrNotConfigured marks a missing URL or credentials: the user has to configure
+// something, which is a usage problem, not an API failure.
+var ErrNotConfigured = errors.New("not configured")
 
 // PermissionError is returned when the context lacks the required permission tier.
 type PermissionError struct {
@@ -212,7 +217,7 @@ func LoadConfig(contextOverride string) (*Config, *Context, error) {
 	}
 
 	if ctx.URL == "" {
-		return nil, nil, fmt.Errorf("no url configured for context %q (set ZBXCTL_URL or config url field)", ctxName)
+		return nil, nil, fmt.Errorf("%w: no url configured for context %q (set ZBXCTL_URL or config url field)", ErrNotConfigured, ctxName)
 	}
 
 	return cfg, &ctx, nil

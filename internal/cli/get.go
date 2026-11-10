@@ -1356,7 +1356,7 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 
 	// Non-numeric item key requires at least one host or group for resolution.
 	if !isNumericStr(flagHistoryItem) && len(flagHistoryHosts) == 0 && len(flagHistoryGroups) == 0 {
-		return cliPrintErr(outFmt, "non-numeric --item requires at least one --host or --group for resolution", output.ExitError)
+		return cliPrintErr(outFmt, "non-numeric --item requires at least one --host or --group for resolution", output.ExitUsage)
 	}
 
 	// Resolve host IDs.
@@ -1391,14 +1391,14 @@ func runGetHistory(_ *cobra.Command, _ []string) error {
 	if flagHistorySince != "" {
 		ts, err := parseTimestamp(flagHistorySince)
 		if err != nil {
-			return cliPrintErr(outFmt, "invalid --since: "+err.Error(), output.ExitError)
+			return cliPrintErr(outFmt, "invalid --since: "+err.Error(), output.ExitUsage)
 		}
 		since = ts
 	}
 	if flagHistoryUntil != "" {
 		ts, err := parseTimestamp(flagHistoryUntil)
 		if err != nil {
-			return cliPrintErr(outFmt, "invalid --until: "+err.Error(), output.ExitError)
+			return cliPrintErr(outFmt, "invalid --until: "+err.Error(), output.ExitUsage)
 		}
 		until = ts
 	}
@@ -1477,12 +1477,12 @@ func runGetHistoryAroundEvent(c *api.Client, outFmt output.Format, ctx *config.C
 	if err != nil {
 		return cliPrintErr(outFmt,
 			fmt.Sprintf("invalid --window %q: use 30m, 1h, 2h, or 6h", flagHistoryWindow),
-			output.ExitError)
+			output.ExitUsage)
 	}
 	if windowDur <= 0 {
 		return cliPrintErr(outFmt,
 			fmt.Sprintf("--window must be a positive duration, got %q", flagHistoryWindow),
-			output.ExitError)
+			output.ExitUsage)
 	}
 	half := windowDur / 2
 
@@ -1696,7 +1696,7 @@ func runGetAlerts(_ *cobra.Command, _ []string) error {
 	if getAlertsSince != "" {
 		ts, err := parseTimestamp(getAlertsSince)
 		if err != nil {
-			return cliPrintErr(outFmt, "invalid --since: "+err.Error(), output.ExitError)
+			return cliPrintErr(outFmt, "invalid --since: "+err.Error(), output.ExitUsage)
 		}
 		f.Since = ts
 	}

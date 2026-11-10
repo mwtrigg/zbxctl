@@ -118,7 +118,7 @@ func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 
 	// Authenticate with username+password.
 	if cfg.Username == "" {
-		return nil, fmt.Errorf("no api_token and no username configured")
+		return nil, fmt.Errorf("%w: no api_token and no username configured", config.ErrNotConfigured)
 	}
 
 	params := map[string]string{
@@ -223,7 +223,7 @@ func retryable(err error) bool {
 // retryBackoff is the base wait between retries.
 var retryBackoff = 500 * time.Millisecond
 
-var errBadGateway = errors.New("gateway error")
+var errBadGateway = fmt.Errorf("gateway error (%w)", ErrConnect) // a connection-class failure: exit 4
 
 func (c *Client) callOnce(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	req := rpcRequest{
@@ -259,9 +259,12 @@ func (c *Client) callOnce(ctx context.Context, method string, params any) (json.
 		return nil, fmt.Errorf("%w: HTTP %d", errBadGateway, resp.StatusCode)
 	}
 
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, fmt.Errorf("%w: unexpected HTTP %d from the server (wrong URL, or something in front of Zabbix?)", ErrConnect, resp.StatusCode)
+	}
 	var rpcResp rpcResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
-		return nil, fmt.Errorf("decoding response: %w", err)
+		return nil, fmt.Errorf("%w: the answer is not a JSON-RPC response (wrong URL, or something in front of Zabbix?): %v", ErrConnect, err)
 	}
 
 	if rpcResp.Error != nil {

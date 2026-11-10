@@ -442,14 +442,14 @@ func runCreateHost(cmd *cobra.Command, _ []string) error {
 	}
 
 	if flagCreateHostIP == "" && flagCreateHostDNS == "" {
-		return cliPrintErr(outFmt, "provide --ip or --dns", output.ExitError)
+		return cliPrintErr(outFmt, "provide --ip or --dns", output.ExitUsage)
 	}
 
 	groupIDs := make([]string, 0, len(flagCreateHostGroups))
 	for _, grp := range flagCreateHostGroups {
 		id, err := resources.ResolveGroupID(c, grp)
 		if err != nil {
-			return cliPrintErr(outFmt, fmt.Sprintf("group %q: %s", grp, err), output.ExitNotFound)
+			return cliFail(outFmt, fmt.Errorf("group %q: %w", grp, err))
 		}
 		groupIDs = append(groupIDs, id)
 	}
@@ -572,7 +572,7 @@ func runRunScript(_ *cobra.Command, args []string) error {
 		return cliPrintErr(outFmt,
 			"run script is blocked: context has no allowed_scripts configured\n"+
 				"Add allowed_scripts to this context in ~/.config/zbxctl/config.yaml",
-			output.ExitError)
+			output.ExitPermission)
 	}
 
 	nameOrID := args[0]
@@ -600,7 +600,7 @@ func runRunScript(_ *cobra.Command, args []string) error {
 	// Check against allowed_scripts: the script's name or ID AND a hash of its
 	// command must match an entry, so a script edited after review is refused.
 	if ok, why := scriptAllowed(ctx.AllowedScripts, script.Name, script.ScriptID, script.Command); !ok {
-		return cliPrintErr(outFmt, why, output.ExitError)
+		return cliPrintErr(outFmt, why, output.ExitPermission)
 	}
 	tty, err := openConfirmationInput()
 	if err != nil {

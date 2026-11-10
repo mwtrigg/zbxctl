@@ -297,3 +297,60 @@ func TestNumericNamesAreNotAlwaysIDs(t *testing.T) {
 		}
 	}
 }
+
+func exitCode(t *testing.T, err error) int {
+	t.Helper()
+	var ce *cliErr
+	if err == nil {
+		return 0
+	}
+	if errors.As(err, &ce) {
+		return ce.code
+	}
+	return classify(err)
+}
+
+func TestExitCodesTellTheTruth(t *testing.T) {
+	// a tier refusal is its own kind, not a generic error
+	f := &fakeZabbix{Handler: hostGetter, Context: "permissions: readonly"}
+	if _, err := runFake(t, f, "delete", "host", "web1", "--apply"); exitCode(t, err) != 8 || len(f.called("host.delete")) != 0 {
+		t.Fatalf("a readonly context refusing a write is exit 8: %v", err)
+	}
+	// something in front of Zabbix answering with HTML or a 404 is a connection problem
+	for name, reply := range map[string]fakeReply{"404": {Status: 404}, "html with 200": {Result: "<html>"}} {
+		f := &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+			if c.Method == "host.get" {
+				return reply
+			}
+			return fakeReply{}
+		}}
+		if _, err := runFake(t, f, "get", "hosts", "--retries", "0"); exitCode(t, err) != 4 {
+			t.Errorf("%s: want exit 4 (connection), got %v", name, err)
+		}
+	}
+	// a failed lookup is not "not found"
+	f = &fakeZabbix{Handler: func(c rpcCall) fakeReply {
+		if c.Method == "hostgroup.get" {
+			return fakeReply{Status: 502}
+		}
+		return fakeReply{}
+	}}
+	if _, err := runFake(t, f, "create", "host", "--name", "h", "--group", "Linux", "--dns", "h.example.com", "--retries", "0"); exitCode(t, err) != 4 {
+		t.Errorf("a 502 while resolving a group is a connection error, not not_found: %v", err)
+	}
+	// bad flag combinations are usage errors
+	if _, err := runFake(t, &fakeZabbix{}, "create", "host", "--name", "h", "--group", "1"); exitCode(t, err) != 5 {
+		t.Errorf("missing --ip/--dns is a usage error: %v", err)
+	}
+}
+
+func TestNoURLIsAUsageError(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("ZBXCTL_URL", "")
+	t.Setenv("ZBXCTL_CONTEXT", "")
+	err := runChildArgs("get", "hosts")
+	if exitCode(t, err) != 5 {
+		t.Fatalf("an unconfigured URL is exit 5, got %v", err)
+	}
+}

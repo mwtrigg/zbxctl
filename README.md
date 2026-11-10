@@ -255,10 +255,11 @@ Lists stop at a limit (`default_limit`, 100 unless you set it, or `--limit N`). 
 | 1 | `error` | API or internal error |
 | 2 | `not_found` | host, template, ... not found |
 | 3 | `auth` | token or login refused |
-| 4 | `connection` | cannot reach Zabbix |
-| 5 | `usage` | invalid flag or argument |
+| 4 | `connection` | cannot reach Zabbix, or something in front of it answered with a 5xx, a 404 or a page that is not an API answer |
+| 5 | `usage` | invalid flag or argument, a name that is ambiguous, or no URL or credentials configured |
 | 6 | `unsupported_version` | the Zabbix server is older than 7.4 |
 | 7 | `unknown_outcome` | a write was sent but a timeout or a 502/503/504 hid the answer: it may have been executed, so look before retrying (the before-state file is kept and marks the target `unknown`) |
+| 8 | `permission` | the context's permission tier (readonly, operator, write) or the `run script` allowlist does not allow the command |
 
 ## Zabbix versions
 
