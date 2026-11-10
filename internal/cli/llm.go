@@ -504,10 +504,11 @@ var capabilities = []CommandSchema{
 	},
 	{
 		Command:     "state prune",
-		Description: "Delete before-state files older than --older-than. Nothing is deleted without --older-than, and without --apply it only lists what would go. Files that are not zbxctl before-state files are never touched.",
+		Description: "Delete before-state files older than --older-than and/or beyond the newest --keep N. Nothing is deleted without one of them, and without --apply it only lists what would go. Files that are not zbxctl before-state files are never touched.",
 		Flags: append(globalFlags(),
 			FlagSchema{Name: "state-dir", Type: "string", Description: "The before-state directory (default ZBXCTL_STATE_DIR, the config state_dir, or ~/.local/state/zbxctl).", Required: false, Default: ""},
-			FlagSchema{Name: "older-than", Type: "string", Description: "Delete files older than this, e.g. 30d.", Required: true, Default: ""},
+			FlagSchema{Name: "older-than", Type: "string", Description: "Delete files older than this, e.g. 30d.", Required: false, Default: ""},
+			FlagSchema{Name: "keep", Type: "int", Description: "Delete everything beyond the newest N files.", Required: false, Default: -1},
 			FlagSchema{Name: "command", Type: "string", Description: "Only files written by this command.", Required: false, Default: ""},
 			FlagSchema{Name: "expect", Type: "int", Description: "Refuse to delete unless exactly N files match.", Required: false, Default: -1},
 			FlagSchema{Name: "apply", Type: "bool", Description: "Actually delete; without it the command only shows what it would delete (--yes is an alias).", Required: false, Default: false},

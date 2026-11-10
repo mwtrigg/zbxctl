@@ -191,6 +191,7 @@ func init() {
 	f.StringVar(&apiParamsFile, "params-file", "", "read the params JSON from this file")
 	f.BoolVar(&apiParamsStdin, "params-stdin", false, "read the params JSON from stdin")
 	f.BoolVar(&bulkNoState, "no-state", false, "do not save an audit record for write methods")
+	f.IntVar(&bulkKeep, "state-keep", -1, "keep at most this many before-state files (default 200; 0 keeps all)")
 	f.StringVar(&bulkStateDir, "state-dir", "", "where the audit record is written (default ~/.local/state/zbxctl)")
 	apiCmd.AddCommand(apiCallCmd)
 	rootCmd.AddCommand(apiCmd)

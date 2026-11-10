@@ -334,6 +334,7 @@ func init() {
 		{Name: "expect", Type: "int", Description: "Refuse to run unless exactly N distinct targets resolve; checked before anything changes.", Default: -1},
 		{Name: "state-dir", Type: "string", Description: "Where the before-state file is written (default ~/.local/state/zbxctl).", Default: ""},
 		{Name: "no-state", Type: "bool", Description: "Do not write a before-state file.", Default: false},
+		{Name: "state-keep", Type: "int", Description: "Keep at most this many before-state files, deleting the oldest as new ones are written (default 200; 0 keeps all).", Default: -1},
 		{Name: "no-verify", Type: "bool", Description: "Skip re-reading each target after the change.", Default: false},
 	}
 	bulk := map[string]bool{"enable host": true, "disable host": true, "enable trigger": true, "disable trigger": true, "acknowledge": true, "unacknowledge": true, "suppress": true, "unsuppress": true, "maintenance delete": true, "maintenance extend": true, "maintenance shorten": true, "delete host": true, "delete template": true, "delete group": true, "delete valuemap": true, "delete regexp": true, "delete item": true, "delete trigger": true, "delete macro": true, "delete lost items": true, "delete lost triggers": true}

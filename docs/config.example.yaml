@@ -16,6 +16,7 @@ contexts:
     # api_call_admin: false # true lets `api call` write user, token, script, action, role... objects
     before_state: true      # save a before-state file for bulk writes under --apply (default true)
     state_dir: ""           # where they go; empty = ~/.local/state/zbxctl
+    state_keep: 200         # keep this many, delete older ones as new are written; 0 = keep all
 
   staging:
     url: https://zabbix-staging.example.com

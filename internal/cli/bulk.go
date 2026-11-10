@@ -24,7 +24,12 @@ var (
 	bulkStateDir string
 	bulkNoState  bool
 	bulkNoVerify bool
+	bulkKeep     = -1 // --state-keep; -1 = not given
 )
+
+// stateKeep is how many before-state files to keep once the settings are
+// merged (flag, ZBXCTL_STATE_KEEP, config, default). 0 keeps everything.
+var stateKeep = config.DefaultStateKeep
 
 func addBulkFlags(cmd *cobra.Command) {
 	f := cmd.Flags()
@@ -32,6 +37,7 @@ func addBulkFlags(cmd *cobra.Command) {
 	f.IntVar(&bulkExpect, "expect", -1, "refuse to run unless exactly N distinct targets resolve")
 	f.StringVar(&bulkStateDir, "state-dir", "", "where the before-state file is written (default ~/.local/state/zbxctl)")
 	f.BoolVar(&bulkNoState, "no-state", false, "do not write a before-state file")
+	f.IntVar(&bulkKeep, "state-keep", -1, "keep at most this many before-state files, deleting the oldest as new ones are written (default 200; 0 keeps all)")
 	f.BoolVar(&bulkNoVerify, "no-verify", false, "skip re-reading each target after the change")
 }
 
@@ -49,6 +55,11 @@ func applyStateSettings(cmd *cobra.Command, ctx *config.Context) {
 	}
 	if bulkStateDir == "" && ctx.StateDir != "" {
 		bulkStateDir = ctx.StateDir
+	}
+	if bulkKeep >= 0 {
+		stateKeep = bulkKeep
+	} else {
+		stateKeep = ctx.KeepStates()
 	}
 }
 
@@ -153,6 +164,32 @@ func createStateFile(name string) (string, error) {
 	return "", fmt.Errorf("cannot create a unique before-state file in %s", dir)
 }
 
+// pruneOldStates keeps the newest stateKeep before-state files in dir and
+// deletes the rest. It never deletes justWritten, only touches files zbxctl
+// wrote, says so on stderr when it deletes anything, and never fails the change
+// that triggered it.
+func pruneOldStates(dir, justWritten string) {
+	if stateKeep <= 0 {
+		return
+	}
+	files, err := readStateFiles(dir)
+	if err != nil || len(files) <= stateKeep {
+		return
+	}
+	removed := 0
+	for _, f := range files[stateKeep:] { // files are newest first
+		if f.Path == justWritten {
+			continue
+		}
+		if os.Remove(f.Path) == nil {
+			removed++
+		}
+	}
+	if removed > 0 {
+		fmt.Fprintf(os.Stderr, "pruned %d old before-state file(s) (keeping %d)\n", removed, stateKeep)
+	}
+}
+
 // Outcomes recorded per target in the before-state file.
 const (
 	statePending = "pending" // planned, not yet attempted
@@ -225,6 +262,7 @@ func newStateRecorder(name string, steps []*step) (*stateRecorder, error) {
 		_ = os.Remove(path)
 		return nil, err
 	}
+	pruneOldStates(filepath.Dir(path), path)
 	return r, nil
 }
 
