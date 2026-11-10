@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -331,5 +332,57 @@ func TestSetMaintenanceEndMovesActiveTillAndPeriodTogether(t *testing.T) {
 	}
 	if err := SetMaintenanceEnd(c, m, 900); err == nil {
 		t.Fatal("end before start must be refused")
+	}
+}
+
+func TestFetchHistoryAllPagesWithoutLosingBoundaryRows(t *testing.T) {
+	// 7000 samples, 2 per second for the first 3000 s, so pages end mid-second.
+	var all []rawHistoryRecord
+	for i := 0; i < 7000; i++ {
+		all = append(all, rawHistoryRecord{ItemID: "1", Clock: strconv.Itoa(1000 + i/2), NS: strconv.Itoa(i % 2), Value: strconv.Itoa(i)})
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Params map[string]any `json:"params"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		from := int64(0)
+		if v, ok := req.Params["time_from"].(float64); ok {
+			from = int64(v)
+		}
+		limit := int(req.Params["limit"].(float64))
+		var page []rawHistoryRecord
+		for _, rec := range all {
+			c, _ := strconv.ParseInt(rec.Clock, 10, 64)
+			if c >= from && len(page) < limit {
+				page = append(page, rec)
+			}
+		}
+		b, _ := json.Marshal(page)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":` + string(b) + `,"id":1}`))
+	}))
+	defer srv.Close()
+	c, _ := api.NewClient(context.Background(), &config.Context{URL: srv.URL, APIToken: "x"})
+	got, err := fetchHistoryAll(c, []string{"1"}, 3, 0, 0, 0)
+	if err != nil || len(got) != 7000 {
+		t.Fatalf("got %d rows, err=%v (want 7000: no loss, no duplicates)", len(got), err)
+	}
+	if _, err := fetchHistoryAll(c, []string{"1"}, 3, 0, 0, 100); err == nil {
+		t.Fatal("the row cap must stop runaway queries")
+	}
+}
+
+func TestGetTrendsOnlyNumericItems(t *testing.T) {
+	c, calls := newFake(t, map[string]string{
+		"item.get":  `[{"itemid":"1","hostid":"9","key_":"cpu","value_type":"0","hosts":[{"host":"h"}]},{"itemid":"2","hostid":"9","key_":"msg","value_type":"4","hosts":[{"host":"h"}]}]`,
+		"trend.get": `[{"itemid":"1","clock":"7200","num":"60","value_min":"1","value_avg":"2","value_max":"3"},{"itemid":"1","clock":"3600","num":"60","value_min":"0","value_avg":"1","value_max":"2"}]`,
+	})
+	rs, err := GetTrends(c, TrendQuery{HostIDs: []string{"9"}, KeySearch: "c"})
+	if err != nil || len(rs) != 2 || rs[0].ClockUnix != 3600 || rs[0].Host != "h" {
+		t.Fatalf("rs=%+v err=%v", rs, err)
+	}
+	ids := (*calls)[1]["params"].(map[string]any)["itemids"].([]any)
+	if len(ids) != 1 || ids[0] != "1" {
+		t.Fatalf("text item must not be queried for trends: %v", ids)
 	}
 }

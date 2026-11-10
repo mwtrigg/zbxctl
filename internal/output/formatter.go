@@ -1,6 +1,7 @@
 package output
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -73,6 +74,7 @@ const (
 	FormatTable Format = "table"
 	FormatJSON  Format = "json"
 	FormatJSONL Format = "jsonl"
+	FormatCSV   Format = "csv"
 )
 
 // Column describes a single output column.
@@ -87,11 +89,14 @@ func Print(format Format, columns []Column, rows []map[string]any) error {
 		return printField(rows)
 	}
 	rows = stripRaw(rows)
+	columns = visibleColumns(columns)
 	switch format {
 	case FormatJSON:
 		return printJSON(columns, rows)
 	case FormatJSONL:
 		return printJSONL(columns, rows)
+	case FormatCSV:
+		return printCSV(columns, rows)
 	default:
 		return printTable(columns, rows)
 	}
@@ -235,4 +240,48 @@ func printField(rows []map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func printCSV(columns []Column, rows []map[string]any) error {
+	w := csv.NewWriter(os.Stdout)
+	head := make([]string, len(columns))
+	for i, c := range columns {
+		head[i] = c.Key
+	}
+	if err := w.Write(head); err != nil {
+		return err
+	}
+	for _, row := range rows {
+		rec := make([]string, len(columns))
+		for i, c := range columns {
+			switch v := row[c.Key].(type) {
+			case nil:
+			case []string:
+				rec[i] = strings.Join(v, ";")
+			default:
+				rec[i] = fmt.Sprint(v)
+			}
+		}
+		if err := w.Write(rec); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	return w.Error()
+}
+
+// visibleColumns drops the raw-value columns unless --raw was given, so tables
+// and CSV do not show empty columns for fields that were stripped.
+func visibleColumns(cols []Column) []Column {
+	if Raw {
+		return cols
+	}
+	out := make([]Column, 0, len(cols))
+	for _, c := range cols {
+		if strings.HasSuffix(c.Key, "_raw") || strings.HasSuffix(c.Key, "_unix") {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
