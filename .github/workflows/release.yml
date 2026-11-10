@@ -5,9 +5,11 @@ name: Release
 #
 # Two jobs. `verify` has no secrets and no environment: it checks that the tag points at a
 # commit that is on main, then runs the vet, the tests and the notices check (the only place
-# repository code is executed). `release` needs it, runs in the protected `release`
-# environment (a reviewer approves every run), and only compiles the code through GoReleaser,
-# so the signing key is never in the same job as the test code.
+# repository code is executed). `release` needs it, runs in the `release` environment (which
+# holds the signing key and accepts only v* tags), and only compiles the code through
+# GoReleaser, so the signing key is never in the same job as the test code. The environment
+# does not require a reviewer (the owner chose not to), so the controls are the verify job,
+# the tag-on-main check and the tag ruleset.
 #
 # The release is signed: checksums.txt is signed with the ZBXCTL_SIGNING_KEY
 # secret (an ed25519 SSH key) into checksums.txt.sig, which `zbxctl upgrade`
@@ -47,8 +49,10 @@ jobs:
   release:
     needs: verify
     runs-on: ubuntu-latest
-    # The signing key lives in the `release` environment, which requires a reviewer to
-    # approve every run, so a pushed tag alone cannot get a release signed.
+    # The signing key lives in the `release` environment, which holds it and restricts it to
+    # v* tags. It does not require a reviewer: a v* tag on a commit that is on main is signed
+    # and published without anyone approving it (the verify job and the tag ruleset are the
+    # controls).
     environment: release
     permissions:
       contents: write       # publish the release

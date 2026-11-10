@@ -44,11 +44,13 @@ rest of the project.
 Releases are built and signed by `.github/workflows/release.yml` when a `v*` tag is pushed.
 One-time repository setup that the workflow relies on:
 
-- A `release` environment with a required reviewer, holding the `ZBXCTL_SIGNING_KEY` secret
-  (an ed25519 SSH key; the public half is compiled in as `internal/cli/release_keys.go` and
-  published as `docs/release-signing-key.pub`). Keep the secret out of the repository-level
-  secrets, so that a pushed tag alone cannot get anything signed.
-- A tag ruleset for `v*` that blocks moving and deleting tags (add a `creation` rule with the owner as bypass if only the owner should be able to create them), and a branch ruleset for `main`. The release workflow refuses a tag whose commit is not on `main`, and the `release` environment's reviewer approves every run.
+- A `release` environment holding the `ZBXCTL_SIGNING_KEY` secret (an ed25519 SSH key; the
+  public half is compiled in as `internal/cli/release_keys.go` and published as
+  `docs/release-signing-key.pub`), restricted to `v*` tags. Keep the secret out of the
+  repository-level secrets, so that only a release job can read it. The environment does not
+  require a reviewer (the owner chose not to): a `v*` tag on a commit that is on `main` is
+  signed and published without anyone approving it.
+- A tag ruleset for `v*` that blocks moving and deleting tags (add a `creation` rule with the owner as bypass if only the owner should be able to create them), and a branch ruleset for `main`. The release workflow refuses a tag whose commit is not on `main`, and its `verify` job runs the vet, the tests and the notices check before anything is signed. Those, and the tag ruleset, are the controls: anyone who can push to `main` and create a `v*` tag can cause a signed release, so keep write access to the repository small.
 - Cut the final release on its own commit (the one that renames `[Unreleased]` to the version in CHANGELOG.md), not on the commit that already carries a release candidate tag.
 - Private vulnerability reporting turned on (see SECURITY.md).
 

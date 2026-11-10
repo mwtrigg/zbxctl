@@ -9,6 +9,10 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+### Changed
+- Docs: the release environment holds the signing key and accepts only `v*` tags, but requires no reviewer; the
+  controls are the verify job, the tag-on-main check and the tag ruleset (CONTRIBUTING.md, SECURITY.md, release.yml).
+
 ## [0.1.1] - 2026-11-10
 
 ### Fixed
