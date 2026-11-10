@@ -76,6 +76,16 @@ Always do the undo as a dry run first and check it against the file.
 
 See [docs/api-coverage.md](docs/api-coverage.md) for what is and is not covered of the Zabbix API.
 
+## MCP server
+
+`zbxctl mcp` serves the commands as [MCP](https://modelcontextprotocol.io) tools over stdio, so an agent can call them without a shell. Each tool call runs zbxctl itself, so the Zabbix URL and token come from the config file or environment of the process that started the server and never pass through the agent.
+
+```json
+{"mcpServers": {"zabbix": {"command": "zbxctl", "args": ["mcp"], "env": {"ZBXCTL_CONTEXT": "lab"}}}}
+```
+
+By default only commands that cannot change anything are offered. `--allow-writes` adds the write commands, and each one is still a dry run until the call passes `apply: true`. Never offered: `run script` (it needs a human to confirm a code), `upgrade`, `context use`, `state prune`, and anything that works on a file path (`export`, `import`, `diff`, and the `--file`/`--dir`/`--*-file` flags). Positional arguments (the host or ID a command works on) go in an `args` array.
+
 ## Zabbix versions
 
 zbxctl supports Zabbix **7.4 and newer**. It asks the server for its version (no login needed) and adapts; a server older than 7.4 is refused with exit code 6 (`--allow-unsupported` or `ZBXCTL_ALLOW_UNSUPPORTED=1` tries anyway), and one newer than the newest version zbxctl has been tested against (7.4) works but prints a warning. To skip the detection call, or to say which version a context talks to, pin it in the config:
