@@ -5,9 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
-	"codeberg.org/mwtrigg/zbxctl/internal/config"
-	"codeberg.org/mwtrigg/zbxctl/internal/output"
+	"github.com/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/config"
+	"github.com/mwtrigg/zbxctl/internal/output"
 )
 
 var authCmd = &cobra.Command{

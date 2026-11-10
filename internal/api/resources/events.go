@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // EventHost is a minimal host reference embedded in event results.

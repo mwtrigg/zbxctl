@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"unicode"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // Host represents a Zabbix host object.

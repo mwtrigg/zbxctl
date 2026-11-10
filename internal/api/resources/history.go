@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strconv"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // HistoryRecord is a single history data point enriched with host and item metadata.

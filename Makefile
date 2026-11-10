@@ -3,7 +3,7 @@
 BINARY  := zbxctl
 CMD     := ./cmd/zbxctl
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS := -ldflags "-X codeberg.org/mwtrigg/zbxctl/internal/version.Version=$(VERSION)"
+LDFLAGS := -ldflags "-X github.com/mwtrigg/zbxctl/internal/version.Version=$(VERSION)"
 
 build:
 	CGO_ENABLED=0 go build $(LDFLAGS) -o $(BINARY) $(CMD)

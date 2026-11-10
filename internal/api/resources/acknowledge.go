@@ -3,7 +3,7 @@ package resources
 import (
 	"fmt"
 
-	"codeberg.org/mwtrigg/zbxctl/internal/api"
+	"github.com/mwtrigg/zbxctl/internal/api"
 )
 
 // AcknowledgeParams holds parameters for acknowledging an event.
