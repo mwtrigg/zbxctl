@@ -10,6 +10,8 @@ contexts:
     ca_file: ""
     proxy: ""
     default_limit: 100
+    permissions: write      # readonly | operator | write (default write)
+    allowed_scripts: []     # names or IDs `run script` may execute; empty = blocked
 
   staging:
     url: https://zabbix-staging.example.com
