@@ -406,6 +406,7 @@ func runGetHost(cmd *cobra.Command, args []string) error {
 		"groups":        h.GroupNames(),
 		"templates":     h.TemplateNames(),
 		"interfaces":    ifaces,
+		"monitored_by":  monitoredBy(c, h),
 		"tags":          tags,
 		"macros":        macros,
 	}
@@ -1888,4 +1889,29 @@ func printProblemGroups(outFmt output.Format, problems []resources.Problem) erro
 		})
 	}
 	return output.Print(outFmt, cols, rows)
+}
+
+// monitoredBy says what collects the host's data: the server, a proxy or a proxy group.
+func monitoredBy(c *api.Client, h *resources.Host) string {
+	switch h.MonitoredBy {
+	case "1":
+		if ps, err := resources.GetProxies(c); err == nil {
+			for _, p := range ps {
+				if p.ID == h.ProxyID {
+					return "proxy " + p.Name
+				}
+			}
+		}
+		return "proxy " + h.ProxyID
+	case "2":
+		if gs, err := resources.GetProxyGroups(c); err == nil {
+			for _, g := range gs {
+				if g.ID == h.ProxyGroupID {
+					return "proxy group " + g.Name
+				}
+			}
+		}
+		return "proxy group " + h.ProxyGroupID
+	}
+	return "server"
 }
