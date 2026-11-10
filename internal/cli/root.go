@@ -46,7 +46,7 @@ func cliPrintErr(outFmt output.Format, msg string, code int) error {
 var rootCmd = &cobra.Command{
 	Use:   "zbxctl",
 	Short: "zbxctl — Zabbix CLI for agents and operators",
-	Long: `zbxctl is a CLI for managing Zabbix 7.0+ without the web UI.
+	Long: `zbxctl is a CLI for managing Zabbix 7.4 and newer without the web UI.
 
 Single static binary. Machine-readable output. Structured errors.`,
 	SilenceUsage:  true,
