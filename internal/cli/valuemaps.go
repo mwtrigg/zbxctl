@@ -200,13 +200,19 @@ func init() {
 			for i, m := range ms {
 				labels[i] = m.Label()
 			}
-			if !confirm(fmt.Sprintf("create value map %q on %s with %s?", vmName, label, strings.Join(labels, ", "))) {
+			w, proceed, err := beginWrite(cmd, ctx, "create-valuemap", label+" "+vmName, fmt.Sprintf("create value map %q on %s with %s", vmName, label, strings.Join(labels, ", ")),
+				map[string]any{"creates": "value map", "owner": label, "name": vmName, "mappings": labels})
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			vid, err := resources.CreateValueMap(c, id, vmName, ms)
 			if err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "valuemapid", Header: "ID"}, {Key: "owner", Header: "OWNER"}, {Key: "name", Header: "NAME"}, {Key: "mappings", Header: "MAPPINGS"}},
 				[]map[string]any{{"valuemapid": vid, "owner": label, "name": vmName, "mappings": labels}})
 		},
@@ -255,12 +261,18 @@ func init() {
 			if len(what) == 0 {
 				return cliPrintErr(outFmt, "nothing to change: give --name and/or mappings (they replace all existing ones)", output.ExitUsage)
 			}
-			if !confirm(fmt.Sprintf("update value map %q (%s): %s?", vm.Name, vm.Owner, strings.Join(what, "; "))) {
+			w, proceed, err := beginWrite(cmd, ctx, "update-valuemap", vm.ID, fmt.Sprintf("update value map %q (%s): %s", vm.Name, vm.Owner, strings.Join(what, "; ")),
+				map[string]any{"valuemapid": vm.ID, "owner": vm.Owner, "name": vm.Name, "mappings": vm.MappingLabels()})
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			if err := resources.UpdateValueMap(c, vm.ID, name, ms); err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "valuemapid", Header: "ID"}, {Key: "changes", Header: "CHANGES"}},
 				[]map[string]any{{"valuemapid": vm.ID, "owner": vm.Owner, "changes": what}})
 		},
@@ -374,13 +386,19 @@ func init() {
 			for i, e := range exprs {
 				labels[i] = e.Label()
 			}
-			if !confirm(fmt.Sprintf("create regular expression %q with %s?", reName, strings.Join(labels, ", "))) {
+			w, proceed, err := beginWrite(cmd, ctx, "create-regexp", reName, fmt.Sprintf("create regular expression %q with %s", reName, strings.Join(labels, ", ")),
+				map[string]any{"creates": "regular expression", "name": reName, "expressions": labels})
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			id, err := resources.CreateRegexp(c, reName, reTest, exprs)
 			if err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, regexpCols, []map[string]any{{"regexpid": id, "name": reName, "expressions": labels}})
 		},
 	}
@@ -427,12 +445,18 @@ func init() {
 			if len(what) == 0 {
 				return cliPrintErr(outFmt, "nothing to change: give --name and/or --expr (it replaces all existing expressions)", output.ExitUsage)
 			}
-			if !confirm(fmt.Sprintf("update regular expression %q: %s?", r.Name, strings.Join(what, "; "))) {
+			w, proceed, err := beginWrite(cmd, ctx, "update-regexp", r.ID, fmt.Sprintf("update regular expression %q: %s", r.Name, strings.Join(what, "; ")),
+				map[string]any{"regexpid": r.ID, "name": r.Name, "expressions": r.ExpressionLabels()})
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			if err := resources.UpdateRegexp(c, r.ID, name, exprs); err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "regexpid", Header: "ID"}, {Key: "changes", Header: "CHANGES"}}, []map[string]any{{"regexpid": r.ID, "changes": what}})
 		},
 	}

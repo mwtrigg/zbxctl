@@ -68,13 +68,19 @@ func init() {
 			if _, err := resources.GetGroupInfo(c, groupName); err == nil {
 				return cliFail(outFmt, &usageError{fmt.Sprintf("host group %q already exists", groupName)})
 			}
-			if !confirm(fmt.Sprintf("create host group %q?", groupName)) {
+			w, proceed, err := beginWrite(cmd, ctx, "create-group", groupName, fmt.Sprintf("create host group %q", groupName),
+				map[string]any{"creates": "host group", "name": groupName, "undo": "delete group " + groupName})
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			id, err := resources.CreateGroup(c, groupName)
 			if err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "groupid", Header: "GROUP_ID"}, {Key: "name", Header: "NAME"}}, []map[string]any{{"groupid": id, "name": groupName}})
 		},
 	}
@@ -96,12 +102,18 @@ func init() {
 			if err != nil {
 				return cliFail(outFmt, err)
 			}
-			if !confirm(fmt.Sprintf("rename host group %q to %q?", g.Name, groupNewName)) {
+			w, proceed, err := beginWrite(cmd, ctx, "update-group", g.GroupID, fmt.Sprintf("rename host group %q to %q", g.Name, groupNewName),
+				map[string]any{"groupid": g.GroupID, "name": g.Name})
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			if err := resources.RenameGroup(c, g.GroupID, groupNewName); err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "groupid", Header: "GROUP_ID"}, {Key: "name", Header: "NAME"}, {Key: "previous_name", Header: "PREVIOUS"}},
 				[]map[string]any{{"groupid": g.GroupID, "name": groupNewName, "previous_name": g.Name}})
 		},

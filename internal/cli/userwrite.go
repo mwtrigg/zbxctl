@@ -125,15 +125,21 @@ func runCreateUser(cmd *cobra.Command, args []string) error {
 		gids = append(gids, ug.UserGroupID)
 		gnames = append(gnames, ug.Name)
 	}
-	if !confirm(fmt.Sprintf("create user %q (role %s, groups %s)?", cuUsername, role.Name, strings.Join(gnames, ","))) {
+	w, proceed, err := beginWrite(cmd, ctx, "create-user", cuUsername, fmt.Sprintf("create user %q (role %s, groups %s)", cuUsername, role.Name, strings.Join(gnames, ",")),
+		map[string]any{"creates": "user", "username": cuUsername, "role": role.Name, "groups": gnames, "undo": "delete user " + cuUsername})
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if !proceed {
 		return nil
 	}
 	id, err := resources.CreateUser(c, resources.CreateUserInput{
 		Username: cuUsername, Password: pw, Name: cuName, Surname: cuSurname, RoleID: role.RoleID, GroupIDs: gids,
 	})
 	if err != nil {
-		return cliFail(outFmt, err)
+		return cliFail(outFmt, w.failed(err))
 	}
+	w.ok()
 	return output.Print(outFmt, []output.Column{{Key: "userid", Header: "USER_ID"}, {Key: "username", Header: "USERNAME"}, {Key: "role", Header: "ROLE"}, {Key: "groups", Header: "GROUPS"}},
 		[]map[string]any{{"userid": id, "username": cuUsername, "role": role.Name, "groups": gnames}})
 }
@@ -168,12 +174,17 @@ func runDeleteUser(cmd *cobra.Command, args []string) error {
 	if err := userDeleteBlock(u.Username, u.UserID, ownerID); err != nil {
 		return cliFail(outFmt, err)
 	}
-	if !confirm(fmt.Sprintf("delete user %q (id %s)?", u.Username, u.UserID)) {
+	w, proceed, err := beginWrite(cmd, ctx, "delete-user", u.UserID, fmt.Sprintf("delete user %q (id %s)", u.Username, u.UserID), fieldsOf(u))
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if !proceed {
 		return nil
 	}
 	if err := resources.DeleteUser(c, u.UserID); err != nil {
-		return cliFail(outFmt, err)
+		return cliFail(outFmt, w.failed(err))
 	}
+	w.ok()
 	return output.Print(outFmt, []output.Column{{Key: "userid", Header: "USER_ID"}, {Key: "username", Header: "USERNAME"}, {Key: "status", Header: "STATUS"}},
 		[]map[string]any{{"userid": u.UserID, "username": u.Username, "status": "deleted"}})
 }
@@ -192,13 +203,19 @@ func runCreateUserGroup(cmd *cobra.Command, args []string) error {
 	if !ok {
 		return cliPrintErr(outFmt, fmt.Sprintf("invalid --gui-access %q: use default|internal|ldap|disabled", cgGUI), output.ExitUsage)
 	}
-	if !confirm(fmt.Sprintf("create user group %q?", cgName)) {
+	w, proceed, err := beginWrite(cmd, ctx, "create-usergroup", cgName, fmt.Sprintf("create user group %q", cgName),
+		map[string]any{"creates": "user group", "name": cgName, "gui_access": cgGUI, "disabled": cgDisabled, "undo": "delete usergroup " + cgName})
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if !proceed {
 		return nil
 	}
 	id, err := resources.CreateUserGroup(c, cgName, code, cgDisabled)
 	if err != nil {
-		return cliFail(outFmt, err)
+		return cliFail(outFmt, w.failed(err))
 	}
+	w.ok()
 	return output.Print(outFmt, []output.Column{{Key: "usrgrpid", Header: "GROUP_ID"}, {Key: "name", Header: "NAME"}},
 		[]map[string]any{{"usrgrpid": id, "name": cgName, "gui_access": cgGUI, "disabled": cgDisabled}})
 }
@@ -215,12 +232,17 @@ func runDeleteUserGroup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return cliFail(outFmt, err)
 	}
-	if !confirm(fmt.Sprintf("delete user group %q (id %s)?", g.Name, g.UserGroupID)) {
+	w, proceed, err := beginWrite(cmd, ctx, "delete-usergroup", g.UserGroupID, fmt.Sprintf("delete user group %q (id %s)", g.Name, g.UserGroupID), fieldsOf(g))
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if !proceed {
 		return nil
 	}
 	if err := resources.DeleteUserGroup(c, g.UserGroupID); err != nil {
-		return cliFail(outFmt, err)
+		return cliFail(outFmt, w.failed(err))
 	}
+	w.ok()
 	return output.Print(outFmt, []output.Column{{Key: "usrgrpid", Header: "GROUP_ID"}, {Key: "name", Header: "NAME"}, {Key: "status", Header: "STATUS"}},
 		[]map[string]any{{"usrgrpid": g.UserGroupID, "name": g.Name, "status": "deleted"}})
 }

@@ -103,7 +103,9 @@ There is deliberately no automatic restore: too much can go subtly wrong (a dele
 | `delete host` | groups, templates, tags, interfaces, macros | `create host`, then `update host` and `set macro`; history is gone |
 | `delete template` | the full yaml export | save `export_yaml` to a file, then `import template <file> --apply` |
 | `import template\|host` | the previous yaml export of every object it changed | import that yaml again (objects the import created are not recorded) |
-| `delete group`, `item`, `trigger`, `macro`, `valuemap`, `regexp`, `user` | the object's fields | the matching `create` / `set` command with those fields |
+| `delete group`, `item`, `trigger`, `macro`, `valuemap`, `regexp`, `user`, `usergroup` | the object's fields | the matching `create` / `set` command with those fields |
+| `update item`, `trigger`, `group`, `valuemap`, `regexp`, `set macro`, `tag` / `untag host` | the object as it was (a secret macro's value is never returned by Zabbix, so it cannot be saved) | the same `update` / `set` command with the old values |
+| `create ...` | what was requested, and the command that undoes it | the `delete` command named in the file |
 | `delete lost items\|triggers` | what was deleted | nothing to restore: discovery recreates them if the object comes back |
 
 Do the undo as a dry run first and check it against the file.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -98,11 +99,21 @@ func changeHostTags(cmd *cobra.Command, idOrName string, change func([]resources
 	if !changed {
 		return output.Print(outFmt, cols, []map[string]any{{"hostid": h.HostID, "host": h.Host, "changed": false, "tags": tagLabels(h.Tags)}})
 	}
-	if !confirm(fmt.Sprintf("%s %q?", what, h.Host)) {
+	name := "tag-host"
+	if strings.HasPrefix(what, "remove") {
+		name = "untag-host"
+	}
+	w, proceed, err := beginWrite(cmd, ctx, name, h.HostID, fmt.Sprintf("%s %q", what, h.Host),
+		map[string]any{"hostid": h.HostID, "host": h.Host, "tags": tagLabels(h.Tags)})
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if !proceed {
 		return nil
 	}
 	if err := resources.SetHostTags(c, h.HostID, newTags); err != nil {
-		return cliFail(outFmt, err)
+		return cliFail(outFmt, w.failed(err))
 	}
+	w.ok()
 	return output.Print(outFmt, cols, []map[string]any{{"hostid": h.HostID, "host": h.Host, "changed": true, "tags": tagLabels(newTags)}})
 }

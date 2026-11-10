@@ -222,18 +222,25 @@ func runMaintenanceCreate(cmd *cobra.Command, args []string) error {
 		p.GroupIDs = []string{g.GroupID}
 	}
 
-	prompt := fmt.Sprintf("create maintenance %q from %s to %s?",
+	prompt := fmt.Sprintf("create maintenance %q from %s to %s",
 		maintCreateName,
 		fmtUnix(strconv.FormatInt(startTS, 10)),
 		fmtUnix(strconv.FormatInt(endTS, 10)))
-	if !confirm(prompt) {
+	w, proceed, err := beginWrite(cmd, ctx, "maintenance-create", maintCreateName, prompt,
+		map[string]any{"creates": "maintenance", "name": maintCreateName, "start": fmtUnix(strconv.FormatInt(startTS, 10)), "end": fmtUnix(strconv.FormatInt(endTS, 10)),
+			"hosts": p.HostIDs, "groups": p.GroupIDs, "undo": "maintenance delete " + maintCreateName})
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if !proceed {
 		return nil
 	}
 
 	id, err := resources.CreateMaintenance(c, p)
 	if err != nil {
-		return cliFail(outFmt, err)
+		return cliFail(outFmt, w.failed(err))
 	}
+	w.ok()
 
 	return output.Print(outFmt, []output.Column{
 		{Key: "maintenanceid", Header: "MAINTENANCE_ID"},
@@ -425,7 +432,7 @@ func init() {
 	deleteCmd.AddCommand(deleteHostCmd)
 }
 
-func runCreateHost(_ *cobra.Command, _ []string) error {
+func runCreateHost(cmd *cobra.Command, _ []string) error {
 	c, outFmt, ctx, err := writeClient()
 	if err != nil {
 		return cliFail(output.Format(flagOutput), err)
@@ -473,14 +480,20 @@ func runCreateHost(_ *cobra.Command, _ []string) error {
 		},
 	}
 
-	if !confirm(fmt.Sprintf("create host %q?", flagCreateHostName)) {
+	w, proceed, err := beginWrite(cmd, ctx, "create-host", flagCreateHostName, fmt.Sprintf("create host %q", flagCreateHostName),
+		map[string]any{"creates": "host", "host": flagCreateHostName, "groups": flagCreateHostGroups, "interface_type": flagCreateHostIfaceType, "undo": "delete host " + flagCreateHostName})
+	if err != nil {
+		return cliFail(outFmt, err)
+	}
+	if !proceed {
 		return nil
 	}
 
 	host, err := resources.CreateHost(c, in)
 	if err != nil {
-		return cliFail(outFmt, err)
+		return cliFail(outFmt, w.failed(err))
 	}
+	w.ok()
 
 	if outFmt == output.FormatTable {
 		fmt.Printf("created host %s (id: %s)\n", host.Host, host.HostID)

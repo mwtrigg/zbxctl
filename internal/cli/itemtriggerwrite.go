@@ -102,18 +102,24 @@ func init() {
 			if st, ok := statusCode(itStatus); ok {
 				p["status"] = st
 			}
-			if !confirm(fmt.Sprintf("create %s item %q (%s) on %s?", itType, itName, itKey, h.Host)) {
-				return nil
-			}
 			if itType == "agent" || itType == "simple" {
 				if p["interfaceid"], err = resources.MainAgentInterfaceID(c, h.HostID); err != nil {
 					return cliFail(outFmt, err)
 				}
 			}
-			id, err := resources.CreateItem(c, p)
+			w, proceed, err := beginWrite(cmd, ctx, "create-item", h.Host+" "+itKey, fmt.Sprintf("create %s item %q (%s) on %s", itType, itName, itKey, h.Host),
+				map[string]any{"creates": "item", "host": h.Host, "name": itName, "key": itKey, "type": itType, "undo": "delete item " + itKey + " --host " + h.Host})
 			if err != nil {
 				return cliFail(outFmt, err)
 			}
+			if !proceed {
+				return nil
+			}
+			id, err := resources.CreateItem(c, p)
+			if err != nil {
+				return cliFail(outFmt, w.failed(err))
+			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "itemid", Header: "ITEM_ID"}, {Key: "host", Header: "HOST"}, {Key: "name", Header: "NAME"}, {Key: "key_", Header: "KEY"}},
 				[]map[string]any{{"itemid": id, "host": h.Host, "name": itName, "key_": itKey}})
 		},
@@ -187,12 +193,17 @@ func init() {
 			if len(fields) == 0 {
 				return cliPrintErr(outFmt, "nothing to change: give at least one of --name, --delay, --units, --history, --trends, --description, --formula, --status", output.ExitUsage)
 			}
-			if !confirm(fmt.Sprintf("update item %q (%s) on %s: %s?", it.Name, it.Key, it.Host, strings.Join(changes, ", "))) {
+			w, proceed, err := beginWrite(cmd, ctx, "update-item", it.ID, fmt.Sprintf("update item %q (%s) on %s: %s", it.Name, it.Key, it.Host, strings.Join(changes, ", ")), fieldsOf(it))
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			if err := resources.UpdateItem(c, it.ID, fields); err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "itemid", Header: "ITEM_ID"}, {Key: "host", Header: "HOST"}, {Key: "key_", Header: "KEY"}, {Key: "changes", Header: "CHANGES"}},
 				[]map[string]any{{"itemid": it.ID, "host": it.Host, "key_": it.Key, "changes": changes}})
 		},
@@ -240,13 +251,19 @@ func init() {
 			if tgManual {
 				p["manual_close"] = 1
 			}
-			if !confirm(fmt.Sprintf("create trigger %q with expression %s?", tgDesc, tgExpr)) {
+			w, proceed, err := beginWrite(cmd, ctx, "create-trigger", tgDesc, fmt.Sprintf("create trigger %q with expression %s", tgDesc, tgExpr),
+				map[string]any{"creates": "trigger", "description": tgDesc, "expression": tgExpr, "severity": severityLabel(fmt.Sprint(sev))})
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			id, err := resources.CreateTrigger(c, p)
 			if err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "triggerid", Header: "TRIGGER_ID"}, {Key: "description", Header: "DESCRIPTION"}},
 				[]map[string]any{{"triggerid": id, "description": tgDesc, "expression": tgExpr, "severity": severityLabel(sev)}})
 		},
@@ -308,12 +325,17 @@ func init() {
 			if len(fields) == 0 {
 				return cliPrintErr(outFmt, "nothing to change: give at least one of --description, --expression, --severity, --comments, --manual-close", output.ExitUsage)
 			}
-			if !confirm(fmt.Sprintf("update trigger %s on %s: %s?", tr.ID, strings.Join(tr.Hosts, ","), strings.Join(changes, "; "))) {
+			w, proceed, err := beginWrite(cmd, ctx, "update-trigger", tr.ID, fmt.Sprintf("update trigger %s on %s: %s", tr.ID, strings.Join(tr.Hosts, ","), strings.Join(changes, "; ")), fieldsOf(tr))
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			if err := resources.UpdateTrigger(c, tr.ID, fields); err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "triggerid", Header: "TRIGGER_ID"}, {Key: "changes", Header: "CHANGES"}},
 				[]map[string]any{{"triggerid": tr.ID, "hosts": tr.Hosts, "changes": changes}})
 		},

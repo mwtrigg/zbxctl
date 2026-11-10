@@ -114,6 +114,9 @@ func init() {
 			if !smSecret && !smVault && existing != nil && !cmd.Flags().Changed("secret") {
 				typ = existing.Type // keep the type unless one was asked for
 			}
+			if typ == "1" && cmd.Flags().Changed("value") {
+				return cliFail(outFmt, &usageError{"this macro is secret: give the value with --value-file or --value-stdin, not on the command line"})
+			}
 			shown := "'" + val + "'"
 			if typ == "1" {
 				shown = "(secret)"
@@ -122,7 +125,23 @@ func init() {
 			if existing != nil {
 				verb = "update"
 			}
-			if !confirm(fmt.Sprintf("%s macro %s on %s to %s?", verb, smMacro, scope, shown)) {
+			// What a person needs to put the old value back. A secret's value is never
+			// returned by the API, so it cannot be saved.
+			before := map[string]any{"scope": scope, "macro": smMacro, "existed": existing != nil}
+			if existing != nil {
+				before["type"] = map[string]string{"0": "text", "1": "secret", "2": "vault"}[existing.Type]
+				before["description"] = existing.Description
+				if existing.Type == "1" {
+					before["value"] = "(secret, not recoverable)"
+				} else {
+					before["value"] = existing.Value
+				}
+			}
+			w, proceed, err := beginWrite(cmd, ctx, "set-macro", scope+" "+smMacro, fmt.Sprintf("%s macro %s on %s to %s", verb, smMacro, scope, shown), before)
+			if err != nil {
+				return cliFail(outFmt, err)
+			}
+			if !proceed {
 				return nil
 			}
 			in := resources.MacroInput{HostID: hostID, Global: smGlobal, Macro: smMacro, Value: val, Type: typ}
@@ -131,8 +150,9 @@ func init() {
 			}
 			action, err := resources.SetMacro(c, in)
 			if err != nil {
-				return cliFail(outFmt, err)
+				return cliFail(outFmt, w.failed(err))
 			}
+			w.ok()
 			return output.Print(outFmt, []output.Column{{Key: "scope", Header: "SCOPE"}, {Key: "macro", Header: "MACRO"}, {Key: "action", Header: "ACTION"}},
 				[]map[string]any{{"scope": scope, "macro": smMacro, "action": action, "type": map[string]string{"0": "text", "1": "secret", "2": "vault"}[typ]}})
 		},
