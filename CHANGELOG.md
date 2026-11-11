@@ -9,6 +9,14 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+### Security
+- Releases are built with the newest Go 1.26 patch release. The 0.1.2 binaries were built with Go 1.26.10, which has
+  a vulnerability in `net/http` (GO-2026-6859, fixed in Go 1.26.11); this release is built with the fixed toolchain.
+
+### Changed
+- The CI and release workflows ask for the newest Go patch release instead of the one cached on the build machine,
+  so the vulnerability check and the release do not lag behind a security fix.
+
 ## [0.1.2] - 2026-11-10
 
 ### Changed

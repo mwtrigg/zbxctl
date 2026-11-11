@@ -38,6 +38,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26"   # the newest 1.26.x patch (1.25 is out of support): releases and CI carry the stdlib fixes
+          check-latest: true   # the newest patch, not the one cached on the runner: a cached patch can lack a security fix
       - name: Test before releasing
         run: |
           go vet ./...
@@ -70,6 +71,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: "1.26"
+          check-latest: true   # the newest patch, not the one cached on the runner: a cached patch can lack a security fix
       - name: Release notes from CHANGELOG.md
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
       - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0
