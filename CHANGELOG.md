@@ -9,6 +9,12 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-11
+
+### Added
+- `ZBXCTL_OUTPUT` and a per-context `output:` setting choose the default output format (json, jsonl, table,
+  csv). `--output` still wins; the MCP server always uses JSON.
+
 ## [0.1.3] - 2026-11-11
 
 ### Security

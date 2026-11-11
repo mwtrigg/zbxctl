@@ -289,6 +289,7 @@ Priority for every setting: command-line flag, then environment variable, then t
 | `ZBXCTL_MODE` | `dry-run` (default) or `apply`: what a change does when neither `--apply` nor `--dry-run` is given |
 | `ZBXCTL_BEFORE_STATE`, `ZBXCTL_STATE_DIR`, `ZBXCTL_STATE_KEEP` | the before-state files: on or off, where, how many to keep |
 | `ZBXCTL_TZ` | the time zone times are shown in (default UTC) |
+| `ZBXCTL_OUTPUT` | default output format: `json`, `jsonl`, `table` or `csv` (a context can also set `output:`); `--output` wins, and the MCP server always uses JSON. For tables at your own terminal only: `[ -z "$CLAUDECODE" ] && export ZBXCTL_OUTPUT=table` |
 | `ZBXCTL_ALLOW_UNSUPPORTED` | try a Zabbix server older than 7.4 |
 
 Never put a token in a command line or commit one. A token flag does not exist on purpose.

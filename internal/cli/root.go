@@ -70,6 +70,13 @@ Single static binary. Machine-readable output. Structured errors.`,
 			flagApply = true // --yes is an alias for --apply
 		}
 		output.Command = strings.TrimPrefix(cmd.CommandPath(), "zbxctl ")
+		if !cmd.Flags().Changed("output") {
+			def, err := defaultOutput()
+			if err != nil {
+				return err
+			}
+			flagOutput = def
+		}
 		if flagApply && flagDryRun {
 			return &usageError{"--apply and --dry-run contradict each other: use one"}
 		}
@@ -176,7 +183,7 @@ func Execute() int {
 			return ce.code
 		}
 		code := classify(err)
-		output.PrintError(output.Format(flagOutput), err.Error(), code)
+		output.PrintError(errorFormat(), err.Error(), code)
 		return code
 	}
 	return output.ExitSuccess
@@ -184,7 +191,7 @@ func Execute() int {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagOutput, "output", "o",
-		string(output.DefaultFormat()), "output format: json|jsonl|table|csv")
+		string(output.DefaultFormat()), "output format: json|jsonl|table|csv (default: ZBXCTL_OUTPUT, then the context's output setting, then json)")
 	rootCmd.PersistentFlags().StringVarP(&flagContext, "context", "c",
 		"", "override current context")
 	rootCmd.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false,
@@ -224,4 +231,52 @@ func init() {
 	rootCmd.AddCommand(completionCmd)
 	rootCmd.AddCommand(upgradeCmd)
 	rootCmd.AddCommand(versionCmd)
+}
+
+// defaultOutput resolves the output format when --output was not given: the
+// ZBXCTL_OUTPUT environment variable, then the active context's output setting,
+// then json. A person can set table for their own terminal; agents and scripts
+// that want JSON pass -o json or leave the variable unset.
+func defaultOutput() (string, error) {
+	if v := strings.TrimSpace(os.Getenv("ZBXCTL_OUTPUT")); v != "" {
+		if !validOutput(v) {
+			return "", &usageError{msg: "ZBXCTL_OUTPUT: unknown output format " + v + ": use json, jsonl, table or csv"}
+		}
+		return v, nil
+	}
+	// The config is read leniently here: a broken or missing config is reported by
+	// the command itself, in whatever format is the default.
+	if cfg, err := config.LoadConfigFile(); err == nil {
+		if name, err := config.ActiveContextName(flagContext); err == nil && name != "" {
+			if v := strings.TrimSpace(cfg.Contexts[name].Output); v != "" {
+				if !validOutput(v) {
+					return "", &usageError{msg: "context " + name + ": unknown output format " + v + ": use json, jsonl, table or csv"}
+				}
+				return v, nil
+			}
+		}
+	}
+	return string(output.DefaultFormat()), nil
+}
+
+func validOutput(v string) bool {
+	switch output.Format(v) {
+	case output.FormatJSON, output.FormatJSONL, output.FormatTable, output.FormatCSV:
+		return true
+	}
+	return false
+}
+
+// errorFormat is the format an error is printed in when the command never got as
+// far as resolving the default (a bad flag, an unknown command).
+func errorFormat() output.Format {
+	if !rootCmd.PersistentFlags().Changed("output") {
+		if v := strings.TrimSpace(os.Getenv("ZBXCTL_OUTPUT")); validOutput(v) {
+			return output.Format(v)
+		}
+	}
+	if validOutput(flagOutput) {
+		return output.Format(flagOutput)
+	}
+	return output.DefaultFormat()
 }
