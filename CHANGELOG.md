@@ -9,6 +9,10 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+### Changed
+- A binary made with `go install github.com/mwtrigg/zbxctl/cmd/zbxctl@<version>` reports that version instead of `dev`.
+- README: installing with eget or `go install`.
+
 ## [0.1.5] - 2026-11-17
 
 ### Added

@@ -17,6 +17,20 @@
 
 **From a release** (Linux, macOS, Windows; amd64 and arm64): download the archive for your platform from the [Releases](../../releases) page, check it (below), and put `zbxctl` on your `PATH`. Each archive also contains `LICENSE` and `THIRD_PARTY_NOTICES.md`.
 
+**With [eget](https://github.com/zyedidia/eget)** (it picks the archive for your platform and unpacks the binary):
+
+```sh
+eget mwtrigg/zbxctl --asset '^sbom' --to ~/.local/bin
+```
+
+`--asset '^sbom'` skips the bill-of-materials files that sit next to each archive (without it eget asks which file you mean). eget does not check the release signature: for that, see [Check what you downloaded](#check-what-you-downloaded), or let `zbxctl upgrade` do it from then on.
+
+**With Go** (1.26 or newer), built from the tagged source:
+
+```sh
+go install github.com/mwtrigg/zbxctl/cmd/zbxctl@latest
+```
+
 **From source** (Go 1.26 or newer):
 
 ```sh
