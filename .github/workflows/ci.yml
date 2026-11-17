@@ -30,7 +30,7 @@ jobs:
             done
           done
       - name: The release notes can be produced
-        run: scripts/release-notes.sh v0.1.5 > /dev/null
+        run: scripts/release-notes.sh v0.1.6 > /dev/null
       - name: go.mod and go.sum are tidy
         run: |
           go mod tidy
