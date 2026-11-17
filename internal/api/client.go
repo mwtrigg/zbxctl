@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -91,6 +92,21 @@ type rpcErrorBody struct {
 	Data    string `json:"data"`
 }
 
+// loopback reports whether the URL points at this machine, where plain http
+// leaves nothing on a wire (the demo server, a local port forward).
+func loopback(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // NewClient creates and authenticates a Client from the given context config.
 func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 	transport, err := buildTransport(cfg)
@@ -100,7 +116,7 @@ func NewClient(ctx context.Context, cfg *config.Context) (*Client, error) {
 
 	httpClient := &http.Client{Transport: transport, Timeout: Timeout}
 	endpoint := strings.TrimSuffix(strings.TrimRight(cfg.URL, "/"), "/api_jsonrpc.php") + "/api_jsonrpc.php"
-	if strings.HasPrefix(strings.ToLower(endpoint), "http://") {
+	if strings.HasPrefix(strings.ToLower(endpoint), "http://") && !loopback(endpoint) {
 		fmt.Fprintln(os.Stderr, "warning: the Zabbix URL is plain http://, so the API token or password is sent in clear text; use https://")
 	}
 

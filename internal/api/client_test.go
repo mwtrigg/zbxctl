@@ -96,6 +96,9 @@ func TestPlainHTTPWarnsThatTheTokenTravelsInClearText(t *testing.T) {
 	os.Stderr = w
 	_, _ = NewClient(context.Background(), &config.Context{URL: "http://zbx.example.com", APIToken: "t"})
 	_, _ = NewClient(context.Background(), &config.Context{URL: "https://zbx.example.com", APIToken: "t"})
+	// On this machine nothing travels: no warning for the demo server or a local port forward.
+	_, _ = NewClient(context.Background(), &config.Context{URL: "http://127.0.0.1:8044", APIToken: "t"})
+	_, _ = NewClient(context.Background(), &config.Context{URL: "http://localhost:8044", APIToken: "t"})
 	_ = w.Close()
 	os.Stderr = old
 	b, _ := io.ReadAll(r)

@@ -2,7 +2,7 @@
 
 **A Zabbix command line built for both people and AI agents.** Predictable subcommands, flat JSON output, structured errors, and a dry run for every change. One static binary, no runtime dependencies.
 
-<p align="center"><img src="docs/zbxctl.svg" alt="zbxctl in a terminal: a dry run, the same change applied, a grouped problem list, a trigger diagnosis" width="760"></p>
+<p align="center"><img src="docs/zbxctl.gif" alt="zbxctl in a terminal: open problems grouped by alert, why one of them can never recover, then disabling a host as a dry run and for real" width="860"></p>
 
 - **Safe by default.** Reads change nothing. Every write is a dry run until you add `--apply`, and bulk writes check the whole target list first, save an audit file, and verify the result.
 - **Made for scripts and agents.** JSON by default, flat objects with readable values (`"status": "monitored"`), stable exit codes, and a machine-readable description of every command (`zbxctl llm capabilities`). An MCP server is built in.
@@ -24,6 +24,23 @@ git clone https://github.com/mwtrigg/zbxctl
 cd zbxctl
 make build            # or: CGO_ENABLED=0 go build -o zbxctl ./cmd/zbxctl
 ```
+
+### Try it without a Zabbix server
+
+The repository has a small made-up Zabbix API, so you can try zbxctl before pointing it at anything
+real. From a clone:
+
+```sh
+go run ./scripts/demo &
+export ZBXCTL_URL=http://127.0.0.1:8044 ZBXCTL_API_TOKEN=demo ZBXCTL_PERMISSIONS=write
+zbxctl get problems --group-by name -o table
+zbxctl diagnose trigger 4741          # a problem that can never recover, and why
+zbxctl disable host web-03            # a dry run
+zbxctl disable host web-03 --apply
+```
+
+It keeps changes in memory and answers the calls these commands make, not the whole API. The picture
+at the top of this page is zbxctl's real output against it.
 
 ### Check what you downloaded
 
