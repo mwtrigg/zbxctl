@@ -9,6 +9,8 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-17
+
 ### Added
 - `zbxctl demo`: a made-up Zabbix API on localhost, built into the binary, to try zbxctl without a server.
   It is not offered over MCP.
