@@ -1,35 +1,31 @@
-// Command demo serves a small made-up Zabbix API on localhost, so zbxctl can be
-// tried without a Zabbix server at hand:
-//
-//	go run ./scripts/demo            # prints the variables to export
-//	export ZBXCTL_URL=http://127.0.0.1:8044 ZBXCTL_API_TOKEN=demo ZBXCTL_PERMISSIONS=write
-//	zbxctl get problems --group-by name -o table
-//	zbxctl diagnose trigger 4711
+// Package demo serves a small made-up Zabbix API on localhost, so zbxctl can be
+// tried without a Zabbix server at hand (zbxctl demo).
 //
 // Everything it serves is invented (hosts web-01, db-01, ... under example.com). It keeps changes
 // in memory, so disable, enable and acknowledge can be tried with --apply. It
 // answers the calls these commands make, not the whole API: a method it does not
-// know gets an empty list, and -verbose prints which methods were asked for.
-package main
+// know gets an empty list.
+package demo
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
-	"os"
-	"os/signal"
 	"strconv"
 	"sync"
 	"time"
 )
 
+// Token is what the demo expects as the API token (it accepts anything).
+const Token = "demo"
+
 type object = map[string]any
 
 type server struct {
 	mu       sync.Mutex
-	verbose  bool
+	log      io.Writer
 	hosts    []object
 	triggers []object
 	problems []object
@@ -37,27 +33,19 @@ type server struct {
 	events   []object
 }
 
-func main() {
-	addr := flag.String("addr", "127.0.0.1:8044", "address to listen on")
-	verbose := flag.Bool("verbose", false, "print every API method that is called")
-	flag.Parse()
-	s := &server{verbose: *verbose}
-	s.seed()
-	l, err := net.Listen("tcp", *addr)
+// Start serves the demo on addr ("127.0.0.1:8044"). It returns the URL to point
+// zbxctl at and a function that stops it. With a log writer, every API method
+// that is called is written to it.
+func Start(addr string, log io.Writer) (url string, stop func(), err error) {
+	l, err := net.Listen("tcp", addr)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "demo:", err)
-		os.Exit(1)
+		return "", nil, err
 	}
-	fmt.Printf("demo Zabbix API on http://%s; made-up data, kept in memory\n\n", l.Addr())
-	fmt.Printf("  export ZBXCTL_URL=http://%s ZBXCTL_API_TOKEN=demo ZBXCTL_PERMISSIONS=write\n\n", l.Addr())
-	fmt.Println("try:  zbxctl get problems --group-by name -o table")
-	fmt.Println("      zbxctl diagnose trigger 4711")
-	fmt.Println("      zbxctl disable host web-03")
-	fmt.Println("\nCtrl-C stops it.")
-	go func() { _ = http.Serve(l, http.HandlerFunc(s.serve)) }()
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	<-stop
+	s := &server{log: log}
+	s.seed()
+	srv := &http.Server{Handler: http.HandlerFunc(s.serve), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srv.Serve(l) }()
+	return "http://" + l.Addr().String(), func() { _ = srv.Close() }, nil
 }
 
 func ago(d time.Duration) string { return strconv.FormatInt(time.Now().Add(-d).Unix(), 10) }
@@ -170,8 +158,8 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	result := s.call(req.Method, params)
 	s.mu.Unlock()
-	if s.verbose {
-		fmt.Fprintf(os.Stderr, "%s %s\n", req.Method, req.Params)
+	if s.log != nil {
+		fmt.Fprintf(s.log, "%s %s\n", req.Method, req.Params)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(object{"jsonrpc": "2.0", "result": result, "id": req.ID})

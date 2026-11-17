@@ -56,6 +56,7 @@ var mcpHiddenCommands = map[string]string{
 	"run script":   "runs code on a host; never offered to an agent",
 	"context list": "shows the URL of every context, including ones the server is not pinned to",
 	"upgrade":      "replaces the binary",
+	"demo":         "starts a server on this machine; for a person trying the tool",
 	"context use":  "changes the config file",
 	"version":      "",
 	"state prune":  "deletes local files",

@@ -27,11 +27,10 @@ make build            # or: CGO_ENABLED=0 go build -o zbxctl ./cmd/zbxctl
 
 ### Try it without a Zabbix server
 
-The repository has a small made-up Zabbix API, so you can try zbxctl before pointing it at anything
-real. From a clone:
+zbxctl carries a small made-up Zabbix API, so you can try it before pointing it at anything real:
 
 ```sh
-go run ./scripts/demo &
+zbxctl demo &
 export ZBXCTL_URL=http://127.0.0.1:8044 ZBXCTL_API_TOKEN=demo ZBXCTL_PERMISSIONS=write
 zbxctl get problems --group-by name -o table
 zbxctl diagnose trigger 4741          # a problem that can never recover, and why

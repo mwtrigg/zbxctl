@@ -442,7 +442,7 @@ func TestRunScriptRefusesCommandsThatExpandUserMacros(t *testing.T) {
 func TestChildRefusesCommandsTheServerNeverOffers(t *testing.T) {
 	t.Setenv("ZBXCTL_FROM_MCP", "1")
 	for _, args := range [][]string{
-		{"run", "script", "x", "--host", "h"}, {"api", "call", "host.get"}, {"upgrade"}, {"context", "use", "prod"},
+		{"run", "script", "x", "--host", "h"}, {"api", "call", "host.get"}, {"upgrade"}, {"demo"}, {"context", "use", "prod"},
 		{"state", "prune", "--older-than", "1d"}, {"export", "template", "x"}, {"import", "template", "f.yaml"},
 	} {
 		if err := runChildArgs(args...); err == nil || !strings.Contains(err.Error(), "over MCP") {

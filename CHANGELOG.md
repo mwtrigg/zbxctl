@@ -10,7 +10,8 @@ file (`scripts/release-notes.sh`).
 ## [Unreleased]
 
 ### Added
-- `scripts/demo`: a made-up Zabbix API on localhost to try zbxctl without a server (`go run ./scripts/demo`).
+- `zbxctl demo`: a made-up Zabbix API on localhost, built into the binary, to try zbxctl without a server.
+  It is not offered over MCP.
 - The README picture is now an animation of zbxctl's real output against that demo (`docs/zbxctl.gif`, with a
   still in `docs/zbxctl.png`); it replaces the drawn illustration.
 
