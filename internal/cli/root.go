@@ -60,6 +60,7 @@ Single static binary. Machine-readable output. Structured errors.`,
 			return err
 		}
 		output.Raw = flagRaw
+		output.Record = false
 		output.Limit, output.Fetched = 0, 0
 		api.Timeout, api.Retries = flagTimeout, flagRetries
 		if err := setDisplayZone(flagTZ); err != nil {

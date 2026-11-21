@@ -9,6 +9,20 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+### Added
+- `config init`: writes a starting config file (mode 0600) with one context; the token comes
+  from standard input, never from a flag, and an existing file is never overwritten.
+  `config path` prints where the file is looked for.
+
+### Changed
+- One object shown as a table (`get host`, `get template`, `get user` with `-o table`) is
+  printed down the page, one field a line, instead of as one very wide row. JSON, JSONL and CSV
+  are unchanged.
+
+### Fixed
+- A command started by the MCP server no longer applies a change because the context or the
+  environment says `mode: apply`.
+
 ## [0.1.6] - 2026-11-17
 
 ### Changed

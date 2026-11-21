@@ -28,7 +28,7 @@ type Context struct {
 	CAFile         string   `yaml:"ca_file"`
 	Proxy          string   `yaml:"proxy"`
 	DefaultLimit   int      `yaml:"default_limit"`   // default 100
-	Permissions    string   `yaml:"permissions"`     // readonly | operator | write; default write
+	Permissions    string   `yaml:"permissions"`     // readonly | operator | write; default readonly
 	AllowedScripts []string `yaml:"allowed_scripts"` // allowlist for run script, each entry "name@sha256:<hex of the command>"; absent = blocked
 	APICallAdmin   bool     `yaml:"api_call_admin"`  // allow api call to write user, token, script, action, role, usergroup, authentication, userdirectory and mediatype objects
 
@@ -406,3 +406,6 @@ func WriteCurrentContext(name string) error {
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// Path is where the config file is looked for.
+func Path() (string, error) { return defaultConfigPath() }
