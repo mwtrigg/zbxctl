@@ -9,6 +9,8 @@ file (`scripts/release-notes.sh`).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
 ### Added
 - `config init`: writes a starting config file (mode 0600) with one context; the token comes
   from standard input, never from a flag, and an existing file is never overwritten.
