@@ -361,6 +361,7 @@ var getHostCmd = &cobra.Command{
 func init() { getCmd.AddCommand(getHostCmd) }
 
 func runGetHost(cmd *cobra.Command, args []string) error {
+	output.Record = true // one object: as a table, down the page
 	c, outFmt, _, err := newClient()
 	if err != nil {
 		return cliFail(outFmt, err)
@@ -1070,6 +1071,7 @@ var getTemplateCmd = &cobra.Command{
 func init() { getCmd.AddCommand(getTemplateCmd) }
 
 func runGetTemplate(cmd *cobra.Command, args []string) error {
+	output.Record = true // one object: as a table, down the page
 	c, outFmt, _, err := newClient()
 	if err != nil {
 		return cliFail(outFmt, err)
@@ -1208,6 +1210,7 @@ var getUserCmd = &cobra.Command{
 func init() { getCmd.AddCommand(getUserCmd) }
 
 func runGetUser(cmd *cobra.Command, args []string) error {
+	output.Record = true // one object: as a table, down the page
 	c, outFmt, _, err := newClient()
 	if err != nil {
 		return cliFail(outFmt, err)
@@ -1978,7 +1981,9 @@ func applyModeSettings(ctx *config.Context) error {
 		flagApply = false
 		return nil
 	}
-	if !flagApply && ctx.ApplyByDefault() {
+	// mode: apply is a person's convenience. A process started by the MCP server
+	// never applies without being told to, whatever the context or environment says.
+	if !flagApply && ctx.ApplyByDefault() && os.Getenv("ZBXCTL_FROM_MCP") == "" {
 		flagApply = true
 	}
 	return nil

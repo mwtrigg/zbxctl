@@ -127,8 +127,107 @@ func Print(format Format, columns []Column, rows []map[string]any) error {
 	case FormatCSV:
 		return printCSV(columns, rows)
 	default:
+		if Record && len(rows) == 1 {
+			return printRecord(columns, rows[0])
+		}
 		return printTable(columns, rows)
 	}
+}
+
+// Record says that the rows are one object shown with every field: as a table
+// it is printed down the page, one field a line, instead of as one very wide row.
+var Record bool
+
+// printRecord prints one object as "field  value" lines. A nested object (a
+// user's profile) becomes one line per entry; a list is joined on one line.
+func printRecord(columns []Column, row map[string]any) error {
+	type line struct{ key, val string }
+	var lines []line
+	text := func(v any) string {
+		switch t := v.(type) {
+		case nil:
+			return "-"
+		case string:
+			if t == "" {
+				return "-"
+			}
+			return Printable(strings.Join(strings.Fields(strings.ReplaceAll(t, "\n", " / ")), " "))
+		case map[string]any, []map[string]any:
+			b, _ := json.Marshal(t)
+			return Printable(string(b))
+		case []any:
+			parts := make([]string, len(t))
+			for i, it := range t {
+				if s, ok := it.(string); ok {
+					parts[i] = Printable(s)
+				} else {
+					b, _ := json.Marshal(it)
+					parts[i] = Printable(string(b))
+				}
+			}
+			if len(parts) == 0 {
+				return "-"
+			}
+			return strings.Join(parts, ", ")
+		case []string:
+			if len(t) == 0 {
+				return "-"
+			}
+			return Printable(strings.Join(t, ", "))
+		}
+		return Printable(fmt.Sprint(v))
+	}
+	// A nested object is one line per entry, as deep as it goes (a.b.c); what is
+	// unset or empty is left out, since it says nothing.
+	var add func(key string, v any, depth int)
+	add = func(key string, v any, depth int) {
+		m, ok := v.(map[string]any)
+		if !ok || depth > 4 {
+			lines = append(lines, line{key, text(v)})
+			return
+		}
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			switch t := m[k].(type) {
+			case nil:
+				continue
+			case string:
+				if t == "" {
+					continue
+				}
+			case map[string]any:
+				if len(t) == 0 {
+					continue
+				}
+			case []any:
+				if len(t) == 0 {
+					continue
+				}
+			}
+			add(key+"."+k, m[k], depth+1)
+		}
+	}
+	for _, c := range columns {
+		if m, ok := row[c.Key].(map[string]any); ok && len(m) == 0 {
+			lines = append(lines, line{c.Key, "-"})
+			continue
+		}
+		add(c.Key, row[c.Key], 0)
+	}
+	width := 0
+	for _, l := range lines {
+		if len(l.key) > width {
+			width = len(l.key)
+		}
+	}
+	for _, l := range lines {
+		fmt.Fprintf(os.Stdout, "%-*s  %s\n", width, l.key, l.val)
+	}
+	return nil
 }
 
 func printTable(columns []Column, rows []map[string]any) error {
